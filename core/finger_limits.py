@@ -28,6 +28,15 @@ FINGER_GROUPS = [
     ('左食指3', 'index3'),
 ]
 
+
+def property_names():
+    """面板上的 36 个角度属性名。"""
+    return [f'{prefix}_{axis}_{bound}'
+            for _, prefix in BASE_NAMES
+            for axis in ('x', 'y', 'z')
+            for bound in ('min', 'max')]
+
+
 DIGITS = ('１', '２', '３')
 REUSED_FINGERS = ('中指', '薬指', '小指')
 

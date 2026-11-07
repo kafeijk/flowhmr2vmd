@@ -137,13 +137,13 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
     thumb2_x_max: bpy.props.FloatProperty(name='拇指2 X 最大', default=math.radians(30.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    thumb2_y_min: bpy.props.FloatProperty(name='拇指2 Y 最小', default=math.radians(-10.0),
+    thumb2_y_min: bpy.props.FloatProperty(name='拇指2 Y 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    thumb2_y_max: bpy.props.FloatProperty(name='拇指2 Y 最大', default=math.radians(30.0),
+    thumb2_y_max: bpy.props.FloatProperty(name='拇指2 Y 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    thumb2_z_min: bpy.props.FloatProperty(name='拇指2 Z 最小', default=math.radians(-70.0),
+    thumb2_z_min: bpy.props.FloatProperty(name='拇指2 Z 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    thumb2_z_max: bpy.props.FloatProperty(name='拇指2 Z 最大', default=math.radians(30.0),
+    thumb2_z_max: bpy.props.FloatProperty(name='拇指2 Z 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
 
     index1_x_min: bpy.props.FloatProperty(name='食指1 X 最小', default=math.radians(-30.0),
@@ -163,26 +163,26 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
     index2_x_max: bpy.props.FloatProperty(name='食指2 X 最大', default=math.radians(140.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index2_y_min: bpy.props.FloatProperty(name='食指2 Y 最小', default=math.radians(-3.0),
+    index2_y_min: bpy.props.FloatProperty(name='食指2 Y 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index2_y_max: bpy.props.FloatProperty(name='食指2 Y 最大', default=math.radians(1.0),
+    index2_y_max: bpy.props.FloatProperty(name='食指2 Y 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index2_z_min: bpy.props.FloatProperty(name='食指2 Z 最小', default=math.radians(-3.0),
+    index2_z_min: bpy.props.FloatProperty(name='食指2 Z 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index2_z_max: bpy.props.FloatProperty(name='食指2 Z 最大', default=math.radians(1.0),
+    index2_z_max: bpy.props.FloatProperty(name='食指2 Z 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
 
     index3_x_min: bpy.props.FloatProperty(name='食指3 X 最小', default=math.radians(-20.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
     index3_x_max: bpy.props.FloatProperty(name='食指3 X 最大', default=math.radians(85.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index3_y_min: bpy.props.FloatProperty(name='食指3 Y 最小', default=math.radians(-1.0),
+    index3_y_min: bpy.props.FloatProperty(name='食指3 Y 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index3_y_max: bpy.props.FloatProperty(name='食指3 Y 最大', default=math.radians(6.0),
+    index3_y_max: bpy.props.FloatProperty(name='食指3 Y 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index3_z_min: bpy.props.FloatProperty(name='食指3 Z 最小', default=math.radians(-15.0),
+    index3_z_min: bpy.props.FloatProperty(name='食指3 Z 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index3_z_max: bpy.props.FloatProperty(name='食指3 Z 最大', default=math.radians(1.0),
+    index3_z_max: bpy.props.FloatProperty(name='食指3 Z 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
 
     @staticmethod

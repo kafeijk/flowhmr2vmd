@@ -29,6 +29,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
 
             row = inner.row(align=True)
             row.prop(props, 'finger_limits_mode', expand=True)
+            row.operator('rgbmocap.reset_finger_limits', text='', icon='FILE_REFRESH')
             inner.separator()
 
             for label, prefix in FINGER_GROUPS:
@@ -47,7 +48,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
             hint_split = hint_row.split(factor=0.4)
             hint_split.label(text='')
             hint = hint_split.column(align=True)
-            hint.label(text='其余手指沿用食指范围', icon='INFO')
+            hint.label(text='其余手指沿用食指范围（暂定）', icon='INFO')
             hint.label(text='右侧手指参考左侧', icon='INFO')
 
         row = col.row(align=True)

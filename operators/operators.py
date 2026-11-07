@@ -169,3 +169,23 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
                         f"已临时关闭 {len(set(result['muted']))} 根骨骼的 IK/付与约束，"
                         '以便烘焙的 FK 动作在视口中生效。')
         return {'FINISHED'}
+
+
+class RGBMOCAP_OT_reset_finger_limits(bpy.types.Operator):
+    bl_idname = 'rgbmocap.reset_finger_limits'
+    bl_label = '恢复默认手指约束'
+    bl_description = '把所有手指角度范围恢复为默认值'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = getattr(context.scene, 'rgbmocap_properties', None)
+        if props is None:
+            self.report({'ERROR'}, '找不到插件属性。')
+            return {'CANCELLED'}
+        rna = props.bl_rna.properties
+        for name in finger_limits.property_names():
+            item = rna.get(name)
+            if item is not None:
+                setattr(props, name, item.default)
+        self.report({'INFO'}, '手指约束的角度范围已恢复为默认值。')
+        return {'FINISHED'}
