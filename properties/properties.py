@@ -14,6 +14,11 @@ FINGER_LIMITS_MODE_ITEMS = (
     ('DISABLED', '关闭', '删除本插件添加的手指限制约束'),
 )
 
+FINGER_DRIVER_MODE_ITEMS = (
+    ('ENABLED', '启用', '创建中指 / 无名指约束驱动器'),
+    ('DISABLED', '关闭', '删除约束驱动器并把约束恢复为面板范围'),
+)
+
 
 def _active_armature(context):
     obj = context.active_object
@@ -27,13 +32,7 @@ def _active_armature(context):
 
 
 def _apply(self, context, armature):
-    count, missing = finger_limits.apply_finger_limits(armature, self)
-    status = f'已创建 {count} 根手指限制约束。'
-    if missing:
-        status += f'缺少 {len(missing)} 根：' + '、'.join(missing[:4])
-        if len(missing) > 4:
-            status += '…'
-    self.finger_limit_status = status
+    finger_limits.apply_finger_limits(armature, self)
 
 
 def _fallback_armature(context):
@@ -59,22 +58,45 @@ def _update_limit(self, context):
     _apply(self, context, armature)
 
 
+def _update_driver(self, context):
+    armature = _active_armature(context) or _fallback_armature(context)
+    if self.finger_driver_mode != 'ENABLED':
+        if armature is not None:
+            finger_limits.remove_finger_drivers(armature)
+            finger_limits.apply_finger_limits(armature, self)
+        else:
+            for obj in context.scene.objects:
+                if obj.type == 'ARMATURE':
+                    finger_limits.remove_finger_drivers(obj)
+                    finger_limits.apply_finger_limits(obj, self)
+        return
+    if self.finger_limits_mode != 'ENABLED':
+        self.finger_driver_mode = 'DISABLED'
+        return
+    if armature is None:
+        self.finger_driver_mode = 'DISABLED'
+        return
+    finger_limits.apply_finger_drivers(armature, self, context.scene)
+
+
 def _update_enabled(self, context):
     armature = _active_armature(context)
     if self.finger_limits_mode != 'ENABLED':
         if armature is not None:
-            count = finger_limits.remove_finger_limits(armature)
+            finger_limits.remove_finger_drivers(armature)
+            finger_limits.remove_finger_limits(armature)
         else:
-            count = sum(
-                finger_limits.remove_finger_limits(obj)
-                for obj in context.scene.objects if obj.type == 'ARMATURE')
-        self.finger_limit_status = f'已删除 {count} 根手指限制约束。'
+            for obj in context.scene.objects:
+                if obj.type == 'ARMATURE':
+                    finger_limits.remove_finger_drivers(obj)
+                    finger_limits.remove_finger_limits(obj)
         return
     if armature is None:
         self.finger_limits_mode = 'DISABLED'
-        self.finger_limit_status = '请先选中 MMD 模型对象。'
         return
     _apply(self, context, armature)
+    if self.finger_driver_mode == 'ENABLED':
+        finger_limits.apply_finger_drivers(armature, self, context.scene)
 
 
 class RGBMOCAP_Properties(bpy.types.PropertyGroup):
@@ -91,7 +113,7 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
     )
 
     show_finger_limits: bpy.props.BoolProperty(
-        name='展开手指骨骼约束',
+        name='展开手指骨骼设置',
         description='展开后可在下方修改六组基础手指的 XYZ 最小/最大角度',
         default=False,
     )
@@ -99,12 +121,15 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
         name='手指约束',
         description='启用时创建 限定旋转 约束，关闭时删除本插件添加的约束',
         items=FINGER_LIMITS_MODE_ITEMS,
-        default='DISABLED',
+        default='ENABLED',
         update=_update_enabled,
     )
-    finger_limit_status: bpy.props.StringProperty(
-        name='手指约束状态',
-        default='',
+    finger_driver_mode: bpy.props.EnumProperty(
+        name='约束驱动器',
+        description='启用后限制中指与无名指第一节的 Z 旋转，避免交叉；关闭时删除驱动器',
+        items=FINGER_DRIVER_MODE_ITEMS,
+        default='ENABLED',
+        update=_update_driver,
     )
 
     thumb0_x_min: bpy.props.FloatProperty(name='拇指0 X 最小', default=math.radians(-30.0),
@@ -172,9 +197,9 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
     index2_z_max: bpy.props.FloatProperty(name='食指2 Z 最大', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
 
-    index3_x_min: bpy.props.FloatProperty(name='食指3 X 最小', default=math.radians(-20.0),
+    index3_x_min: bpy.props.FloatProperty(name='食指3 X 最小', default=math.radians(-85.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
-    index3_x_max: bpy.props.FloatProperty(name='食指3 X 最大', default=math.radians(85.0),
+    index3_x_max: bpy.props.FloatProperty(name='食指3 X 最大', default=math.radians(10.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')
     index3_y_min: bpy.props.FloatProperty(name='食指3 Y 最小', default=math.radians(0.0),
                                           min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit, precision=0, subtype='ANGLE')

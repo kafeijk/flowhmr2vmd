@@ -21,7 +21,11 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
         col = layout.column()
         col.prop(props, 'folder', text='NPZ 文件夹')
         col.prop(props, 'mapping', text='骨骼名称映射')
-        col.prop(props, 'show_finger_limits', text='展开手指骨骼约束')
+        row = col.row(align=True)
+        row.prop(props, 'show_finger_limits', text='展开手指骨骼设置')
+        if props.show_finger_limits:
+            refresh = row.row(align=True)
+            refresh.operator('rgbmocap.reset_finger_limits', text='', icon='FILE_REFRESH')
         if props.show_finger_limits:
             box = col.box()
             inner = box.column()
@@ -29,7 +33,8 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
 
             row = inner.row(align=True)
             row.prop(props, 'finger_limits_mode', expand=True)
-            row.operator('rgbmocap.reset_finger_limits', text='', icon='FILE_REFRESH')
+            row = inner.row(align=True)
+            row.prop(props, 'finger_driver_mode', expand=True)
             inner.separator()
 
             for label, prefix in FINGER_GROUPS:

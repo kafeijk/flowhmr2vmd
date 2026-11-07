@@ -138,11 +138,9 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             shutil.rmtree(temp, ignore_errors=True)
 
         if props is not None and props.finger_limits_mode == 'ENABLED':
-            count, missing = finger_limits.apply_finger_limits(armature, props)
-            status = f'已创建 {count} 根手指限制约束。'
-            if missing:
-                status += f'缺少 {len(missing)} 根：' + '、'.join(missing[:4])
-            props.finger_limit_status = status
+            finger_limits.apply_finger_limits(armature, props)
+            if props.finger_driver_mode == 'ENABLED':
+                finger_limits.apply_finger_drivers(armature, props, context.scene)
 
         contacts = score.get('score', {}).get('contacts') or []
         details = []
