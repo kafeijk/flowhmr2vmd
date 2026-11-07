@@ -92,6 +92,7 @@ def apply_finger_limits(armature, props):
                 constraint = pose_bone.constraints.new('LIMIT_ROTATION')
                 constraint.name = FINGER_CONSTRAINT_NAME
             constraint.owner_space = 'LOCAL'
+            constraint.mute = False
             for axis, (minimum, maximum) in zip('xyz', value):
                 low, high = sorted((minimum, maximum))
                 setattr(constraint, f'use_limit_{axis}', True)

@@ -4,7 +4,7 @@ import traceback
 import bpy
 import numpy as np
 
-from ..core import bake, geometry, mmd, smplh, solver_client
+from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
 from ..core.constants import A, MAPPING_ITEMS, mapping_for
 
 
@@ -136,6 +136,13 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             return {'CANCELLED'}
         finally:
             shutil.rmtree(temp, ignore_errors=True)
+
+        if props is not None and props.finger_limits_mode == 'ENABLED':
+            count, missing = finger_limits.apply_finger_limits(armature, props)
+            status = f'已创建 {count} 根手指限制约束。'
+            if missing:
+                status += f'缺少 {len(missing)} 根：' + '、'.join(missing[:4])
+            props.finger_limit_status = status
 
         contacts = score.get('score', {}).get('contacts') or []
         details = []
