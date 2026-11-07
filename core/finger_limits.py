@@ -1,11 +1,10 @@
 """Finger rotation limits for MMD humanoid hands.
 
-The six base ranges below are exposed in the panel. 中指 / 薬指 / 小指 reuse
-the corresponding 人指 ranges; .R mirrors X and Y (swap and negate) while Z
-stays unchanged.
+The six base ranges below are exposed in the panel in degrees; the Blender
+angle properties store radians and the constraints consume radians directly.
+中指 / 薬指 / 小指 reuse the corresponding 人指 ranges; .R mirrors X and Y
+(swap and negate) while Z stays unchanged.
 """
-import math
-
 import bpy
 
 FINGER_CONSTRAINT_NAME = '手指旋转限制'
@@ -19,7 +18,15 @@ BASE_NAMES = (
     ('人指３', 'index3'),
 )
 
-FINGER_GROUPS = [(f'{name}.L', prefix) for name, prefix in BASE_NAMES]
+# UI 显示名：日文骨骼名保持内部使用，面板只显示“左 + 中文手指名 + 半角数字”
+FINGER_GROUPS = [
+    ('左拇指0', 'thumb0'),
+    ('左拇指1', 'thumb1'),
+    ('左拇指2', 'thumb2'),
+    ('左食指1', 'index1'),
+    ('左食指2', 'index2'),
+    ('左食指3', 'index3'),
+]
 
 DIGITS = ('１', '２', '３')
 REUSED_FINGERS = ('中指', '薬指', '小指')
@@ -78,8 +85,8 @@ def apply_finger_limits(armature, props):
             for axis, (minimum, maximum) in zip('xyz', value):
                 low, high = sorted((minimum, maximum))
                 setattr(constraint, f'use_limit_{axis}', True)
-                setattr(constraint, f'min_{axis}', math.radians(low))
-                setattr(constraint, f'max_{axis}', math.radians(high))
+                setattr(constraint, f'min_{axis}', low)
+                setattr(constraint, f'max_{axis}', high)
             count += 1
     return count, missing
 

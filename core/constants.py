@@ -32,9 +32,9 @@ FALLBACK_MAPPING[10] = '足先EX.L'
 FALLBACK_MAPPING[11] = '足先EX.R'
 
 MAPPING_ITEMS = [
-    ('NATIVE', 'RGB MoCap 原生（上半身1 / つま先）',
-     '严格使用 RGB MoCap 原始骨骼名；模型必须同时具备 上半身1 和 つま先'),
-    ('FALLBACK', '兼容写法（上半身 / 足先EX）',
+    ('NATIVE', '原生',
+     '模型必须同时具备 上半身1 和 つま先，动作更自然。'),
+    ('FALLBACK', '兼容',
      '用 上半身 代替 上半身1，用 足先EX 代替 つま先；适用于大多数标准 MMD 模型'),
 ]
 
