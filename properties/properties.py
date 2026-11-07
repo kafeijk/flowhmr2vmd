@@ -36,13 +36,25 @@ def _apply(self, context, armature):
     self.finger_limit_status = status
 
 
+def _fallback_armature(context):
+    """唯一一个已经带本插件约束的骨架，用于未选中对象时继续实时更新。"""
+    found = []
+    for obj in context.scene.objects:
+        if obj.type != 'ARMATURE':
+            continue
+        for pose_bone in obj.pose.bones:
+            if any(constraint.name.startswith(finger_limits.FINGER_CONSTRAINT_NAME)
+                   for constraint in pose_bone.constraints):
+                found.append(obj)
+                break
+    return found[0] if len(found) == 1 else None
+
+
 def _update_limit(self, context):
     if self.finger_limits_mode != 'ENABLED':
         return
-    armature = _active_armature(context)
+    armature = _active_armature(context) or _fallback_armature(context)
     if armature is None:
-        self.finger_limits_mode = 'DISABLED'
-        self.finger_limit_status = '请先选中 MMD 模型对象。'
         return
     _apply(self, context, armature)
 

@@ -124,6 +124,12 @@ def main():
                     rest=target_rest, names=np.array(target_names),
                     ratio=ratio, **calibration)
         fixed, plan, diagnostic = m.refine(base, source, active, geo)
+        if source_mode == 'project':
+            # rig.npy 的关节世界姿态沿骨段建立坐标系，与 final.npz 的纯动作
+            # 增量不同约定。直接套用静止段方向会把头部的静息前倾当成动作
+            # 偏移，导致角色低头；这里改用“头相对颈部”的旋转驱动目标头部。
+            relative = world[:, 15] @ np.transpose(world[:, 12], (0, 2, 1))
+            fixed['world'][:, 15] = fixed['world'][:, 12] @ relative
         score = m.score(fixed, source, active, geo, plan)
         np.savez(output / 'stance.npz', root=fixed['root'], world=fixed['world'],
                  local=fixed['local'], points=fixed['points'], rest=target_rest,

@@ -64,6 +64,11 @@ def limits_for(name, limits):
     return None
 
 
+def _owned(constraint):
+    return (constraint.name == FINGER_CONSTRAINT_NAME
+            or constraint.name.startswith(FINGER_CONSTRAINT_NAME + '.'))
+
+
 def apply_finger_limits(armature, props):
     limits = all_limits(props)
     count = 0
@@ -75,12 +80,17 @@ def apply_finger_limits(armature, props):
             if pose_bone is None:
                 missing.append(bone_name)
                 continue
-            for constraint in list(pose_bone.constraints):
-                if constraint.name == FINGER_CONSTRAINT_NAME:
-                    pose_bone.constraints.remove(constraint)
             value = limits_for(bone_name, limits)
-            constraint = pose_bone.constraints.new('LIMIT_ROTATION')
-            constraint.name = FINGER_CONSTRAINT_NAME
+            existing = [c for c in pose_bone.constraints if _owned(c)]
+            constraint = existing[0] if existing else None
+            for extra in existing[1:]:
+                pose_bone.constraints.remove(extra)
+            if constraint is not None and constraint.type != 'LIMIT_ROTATION':
+                pose_bone.constraints.remove(constraint)
+                constraint = None
+            if constraint is None:
+                constraint = pose_bone.constraints.new('LIMIT_ROTATION')
+                constraint.name = FINGER_CONSTRAINT_NAME
             constraint.owner_space = 'LOCAL'
             for axis, (minimum, maximum) in zip('xyz', value):
                 low, high = sorted((minimum, maximum))
@@ -95,7 +105,7 @@ def remove_finger_limits(armature):
     count = 0
     for pose_bone in armature.pose.bones:
         for constraint in list(pose_bone.constraints):
-            if constraint.name == FINGER_CONSTRAINT_NAME:
+            if _owned(constraint):
                 pose_bone.constraints.remove(constraint)
                 count += 1
     return count
