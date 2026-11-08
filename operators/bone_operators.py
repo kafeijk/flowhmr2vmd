@@ -330,6 +330,45 @@ def _move_standardize_channels(action, armature):
     return True
 
 
+def _transfer_toe_rotation(action, armature):
+    """把无权重的 つま先 旋转搬到有权重的 足先EX。
+
+    模3D 模型的 つま先 通常没有顶点权重，实际脚尖由 足先EX
+    （足首D 的付与骨骼）驱动。足首D 与 足首 刚性同步、つま先 是 足首 的
+    子骨骼，所以两边只差一个静息朝向的共轭变换，纯曲线求值即可，
+    不需要逐帧更新场景。
+    """
+    world_rotation = armature.matrix_world.to_quaternion()
+    moved = False
+    for side in ('.L', '.R'):
+        toe_bone = armature.data.bones.get(f'つま先{side}')
+        ex_bone = armature.data.bones.get(f'足先EX{side}')
+        if toe_bone is None or ex_bone is None:
+            continue
+        toe_path = f'pose.bones["つま先{side}"].rotation_quaternion'
+        if not _curves(action, toe_path):
+            continue
+        toe_rest = (world_rotation @ toe_bone.matrix_local.to_quaternion())
+        ex_rest = (world_rotation @ ex_bone.matrix_local.to_quaternion())
+        left = ex_rest.inverted() @ toe_rest
+        right = toe_rest.inverted() @ ex_rest
+        curves = _curve_map(action)
+        frames = sorted(_key_times(action, toe_path))
+        quaternions = []
+        for frame in frames:
+            q_toe = _quaternion_at(curves, toe_path, frame)
+            quaternions.append((left @ q_toe @ right).normalized())
+        if not quaternions:
+            continue
+        _write_curves(action, f'pose.bones["足先EX{side}"].rotation_quaternion',
+                      frames, [[q[i] for q in quaternions] for i in range(4)])
+        for prop in ('rotation_quaternion', 'rotation_euler',
+                     'rotation_axis_angle'):
+            _remove_curves(action, f'pose.bones["つま先{side}"].{prop}')
+        moved = True
+    return moved
+
+
 def _reset_transferred_pose(armature):
     waist = armature.pose.bones.get(_WAIST_BONE)
     if waist is not None:
@@ -348,7 +387,7 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
     bl_idname = 'rgbmocap.standardize'
     bl_label = '标准化'
     bl_description = ('把 腰 的旋转关键帧移到 センター，把 全ての親 的位移移到 センター，'
-                      '并清除原通道')
+                      '并把无权重 つま先 的旋转交给 足先EX，清除原通道')
     bl_options = {'REGISTER', 'UNDO'}
 
     def check_props(self, context):
@@ -378,10 +417,13 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
         if checked is None:
             return {'CANCELLED'}
         armature, action = checked
+        _transfer_toe_rotation(action, armature)
         _move_standardize_channels(action, armature)
         _reset_transferred_pose(armature)
         context.view_layer.update()
-        self.report({'INFO'}, '已把 腰 旋转与 全ての親 位移移动到 センター。')
+        self.report({'INFO'},
+                    '已把 腰 旋转与 全ての親 位移移动到 センター，'
+                    '并把 つま先 旋转交给 足先EX。')
         return {'FINISHED'}
 
 
