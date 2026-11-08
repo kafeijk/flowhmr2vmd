@@ -617,3 +617,83 @@ class RGBMOCAP_OT_fk_to_ik(bpy.types.Operator):
         if state.get('tmp_action') is not None:
             bpy.data.actions.remove(state['tmp_action'])
             state['tmp_action'] = None
+
+
+_FINGER_BASE_NAMES = (
+    '親指０', '親指１', '親指２',
+    '人指１', '人指２', '人指３',
+    '中指１', '中指２', '中指３',
+    '薬指１', '薬指２', '薬指３',
+    '小指１', '小指２', '小指３',
+)
+
+
+class RGBMOCAP_OT_bake_fingers(bpy.types.Operator):
+    bl_idname = 'rgbmocap.bake_fingers'
+    bl_label = '烘焙手指动作'
+    bl_description = ('进入临时场景，用原骨架烘焙手指骨骼的约束结果，'
+                      '写入当前动作并清除手指上的约束')
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = getattr(context.scene, 'rgbmocap_properties', None)
+        if (props is None or
+                (props.finger_limits_mode != 'ENABLED' and
+                 props.finger_driver_mode != 'ENABLED')):
+            self.report({'ERROR'}, '请开启手指约束')
+            return {'CANCELLED'}
+        if not mmd.mmd_tools_enabled():
+            self.report({'ERROR'}, '请先启用 MMD Tools 插件。')
+            return {'CANCELLED'}
+        selected = list(context.selected_objects)
+        obj = context.active_object if context.active_object in selected else (
+            selected[0] if selected else None)
+        if obj is None:
+            self.report({'ERROR'}, '请先选中 MMD 模型对象。')
+            return {'CANCELLED'}
+        root, armature = mmd.find_root_and_armature(obj)
+        if armature is None:
+            self.report({'ERROR'}, '未找到 MMD 骨架。')
+            return {'CANCELLED'}
+        fingers = [armature.pose.bones[f'{base}{side}']
+                   for side in ('.L', '.R') for base in _FINGER_BASE_NAMES
+                   if armature.pose.bones.get(f'{base}{side}') is not None]
+        if not fingers:
+            self.report({'ERROR'}, '骨架缺少手指骨骼。')
+            return {'CANCELLED'}
+
+        original_scene = context.scene
+        frame_end = int(original_scene.frame_end)
+
+        bpy.ops.scene.new(type='NEW')
+        tmp_scene = context.scene
+        tmp_scene.frame_start = 0
+        tmp_scene.frame_end = frame_end
+        # 直接复用原骨架，不拷贝对象；烘焙结果写入同一个 action。
+        tmp_scene.collection.objects.link(armature)
+        for item in context.view_layer.objects:
+            item.select_set(False)
+        armature.select_set(True)
+        context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode='POSE')
+        for bone in armature.data.bones:
+            bone.select = False
+        for pose_bone in fingers:
+            pose_bone.bone.select = True
+        bpy.ops.nla.bake(
+            frame_start=0, frame_end=frame_end, visual_keying=True,
+            clear_constraints=True, clear_parents=True,
+            use_current_action=True, clean_curves=True,
+            bake_types={'POSE'})
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        window = getattr(context, 'window', None)
+        if window is not None:
+            window.scene = original_scene
+        bpy.data.scenes.remove(tmp_scene)
+        # 烘焙后约束已被清除，面板开关同步关闭。
+        props.finger_limits_mode = 'DISABLED'
+        props.finger_driver_mode = 'DISABLED'
+        self.report({'INFO'},
+                    f'已烘焙 {len(fingers)} 根手指骨骼（0..{frame_end} 帧）。')
+        return {'FINISHED'}

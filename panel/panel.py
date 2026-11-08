@@ -68,6 +68,9 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
             row = inner.row(align=True)
             row.prop(props, 'finger_driver_mode', expand=True)
             row.enabled = props.finger_limits_mode == 'ENABLED'
+            row = inner.row(align=True)
+            row.operator('rgbmocap.bake_fingers', text='烘焙手指动作',
+                         icon='ACTION')
             inner.separator()
 
             for label, prefix in FINGER_GROUPS:

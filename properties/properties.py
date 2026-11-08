@@ -105,12 +105,14 @@ def _update_driver(self, context):
     if self.finger_driver_mode != 'ENABLED':
         if armature is not None:
             finger_limits.remove_finger_drivers(armature)
-            finger_limits.apply_finger_limits(armature, self)
+            if self.finger_limits_mode == 'ENABLED':
+                finger_limits.apply_finger_limits(armature, self)
         else:
             for obj in context.scene.objects:
                 if obj.type == 'ARMATURE':
                     finger_limits.remove_finger_drivers(obj)
-                    finger_limits.apply_finger_limits(obj, self)
+                    if self.finger_limits_mode == 'ENABLED':
+                        finger_limits.apply_finger_limits(obj, self)
         return
     if self.finger_limits_mode != 'ENABLED':
         self.finger_driver_mode = 'DISABLED'
