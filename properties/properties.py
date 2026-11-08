@@ -122,14 +122,14 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
         name='手指约束',
         description='启用时创建 限定旋转 约束，关闭时删除本插件添加的约束',
         items=FINGER_LIMITS_MODE_ITEMS,
-        default='ENABLED',
+        default='DISABLED',
         update=_update_enabled,
     )
     finger_driver_mode: bpy.props.EnumProperty(
         name='手指约束驱动器',
         description='启用后限制中指与无名指第一节的 Z 旋转，避免交叉；关闭时删除驱动器',
         items=FINGER_DRIVER_MODE_ITEMS,
-        default='ENABLED',
+        default='DISABLED',
         update=_update_driver,
     )
 
