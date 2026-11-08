@@ -4,7 +4,6 @@ import math
 import bpy
 
 from ..core import finger_limits, mmd
-from ..core.constants import MAPPING_ITEMS
 
 _LIMIT_MIN = math.radians(-180.0)
 _LIMIT_MAX = math.radians(180.0)
@@ -106,13 +105,6 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
         description='包含 final.npz 与 toyxyz / RGB MoCap 工程缓存的 FlowHMR 输出目录',
         subtype='DIR_PATH',
     )
-    mapping: bpy.props.EnumProperty(
-        name='骨骼名称映射',
-        description='选择目标模型的骨骼命名方式；原生映射保留 上半身1 与 脚趾 动画',
-        items=MAPPING_ITEMS,
-        default='NATIVE',
-    )
-
     show_finger_limits: bpy.props.BoolProperty(
         name='展开手指骨骼设置',
         description='展开后可在下方修改六组基础手指的 XYZ 最小/最大角度',

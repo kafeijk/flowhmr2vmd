@@ -5,7 +5,7 @@ import bpy
 import numpy as np
 
 from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
-from ..core.constants import A, MAPPING_ITEMS, mapping_for
+from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 
 
 class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
@@ -18,7 +18,6 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         scene = context.scene
         props = getattr(scene, 'rgbmocap_properties', None)
         folder = bpy.path.abspath(getattr(props, 'folder', '') if props else '')
-        mapping_kind = getattr(props, 'mapping', 'FALLBACK') if props else 'FALLBACK'
         if not folder:
             self.report({'ERROR'}, '请选择包含 final.npz 与 toyxyz 工程缓存的输出目录。')
             return {'CANCELLED'}
@@ -68,24 +67,32 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             self.report({'ERROR'}, '在 PMX Root 下未找到骨架。')
             return {'CANCELLED'}
 
-        mapping = mapping_for(mapping_kind)
-        message = mmd.validate_mapping(armature, mapping)
-        if message:
-            # 选错模式时自动回退到能用的那一套，避免模型缺 上半身1/つま先
-            # 时直接失败；能支持的模型优先用原生映射。
-            other = 'FALLBACK' if mapping_kind == 'NATIVE' else 'NATIVE'
-            alternative = mapping_for(other)
-            if mmd.validate_mapping(armature, alternative) is None:
-                mapping_kind = other
-                mapping = alternative
-                self.report({'INFO'},
-                            f'当前模型不支持所选映射，已自动改用 {other}：{message}')
-            else:
-                label = dict((key, name) for key, name, _ in MAPPING_ITEMS)[
-                    mapping_kind]
-                self.report({'ERROR'}, f'{message}（当前对照：{label}）')
-                return {'CANCELLED'}
-
+        mapping = list(NATIVE_MAPPING)
+        bones = armature.data.bones
+        has_upper1 = bones.get('上半身1') is not None
+        has_toe = (bones.get('つま先.L') is not None and
+                   bones.get('つま先.R') is not None)
+        missing = [name for index, name in enumerate(mapping)
+                   if index not in OPTIONAL_MAPPING_INDEX and
+                   bones.get(name) is None]
+        if not has_toe:
+            # 没有 つま先 时，足先EX 是必备的次标准脚尖骨骼。
+            missing.extend(f'足先EX{side}' for side in ('.L', '.R')
+                           if bones.get(f'足先EX{side}') is None)
+        if missing:
+            self.report({'ERROR'}, '骨架缺少以下必需骨骼：' + '、'.join(missing))
+            return {'CANCELLED'}
+        if not mmd.meshes_for(armature):
+            self.report({'ERROR'}, '骨架下没有蒙皮网格，无法计算脚底接触。')
+            return {'CANCELLED'}
+        skip_indices = []
+        if not has_upper1:
+            # 上半身1 缺失：丢弃该槽位，Spine1 的旋转已包含在 上半身2
+            # 的绝对世界旋转里，效果等同并入 上半身2。
+            mapping[6] = '上半身2'
+            skip_indices.append(6)
+        if not has_toe:
+            skip_indices.extend((10, 11))
         meshes = mmd.meshes_for(armature)
         rest = np.empty((22, 3), np.float64)
 
@@ -94,13 +101,13 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
                             armature.data.bones[name].head_local) @ A
 
         for index, name in enumerate(mapping):
-            if index == 6 and mapping_kind == 'FALLBACK':
+            if index == 6 and not has_upper1:
                 rest[index] = (head('上半身') + head('上半身2')) * .5
+            elif index in (10, 11) and not has_toe:
+                rest[index] = head('足先EX' + ('.L' if index == 10 else '.R'))
             else:
                 rest[index] = head(name)
 
-        lock_toes = (mapping[10] == '足先EX.L' and
-                     mmd.toe_is_granted(armature, mapping))
         try:
             contact = geometry.build_contact_geometry(armature, meshes, mapping, rest)
         except geometry.GeometryError as exc:
@@ -113,12 +120,11 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             request = temp / 'request.npz'
             solver_client.write_request(
                 request, source, rest, mapping, contact,
-                source['source_names'], lock_toes, project=request_project)
+                source['source_names'], False, project=request_project)
             stance_path, score = solver_client.run_solver(request, temp, path)
             stance = solver_client.read_stance(stance_path)
             result = bake.bake_solution(
-                armature, mapping, stance, source,
-                skip_toe=(mapping[10] == '足先EX.L' and lock_toes))
+                armature, mapping, stance, source, skip_indices=skip_indices)
         except solver_client.SolverError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
@@ -147,6 +153,10 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
                 f"{result['frames']} 帧。")
         if details:
             text += ' ' + '；'.join(details) + '。'
+        if not has_upper1:
+            text += ' 缺少 上半身1：其旋转已并入 上半身2。'
+        if not has_toe:
+            text += ' 缺少 つま先：脚趾旋转已丢弃。'
         self.report({'INFO'}, text)
         if score.get('pt_fallback'):
             self.report({'WARNING'},
