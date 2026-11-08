@@ -146,7 +146,7 @@ def _update_enabled(self, context):
 
 class RGBMOCAP_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
-        name='输出目录',
+        name='动作目录',
         description='包含 final.npz 与 toyxyz / RGB MoCap 工程缓存的 FlowHMR 输出目录',
         subtype='DIR_PATH',
     )

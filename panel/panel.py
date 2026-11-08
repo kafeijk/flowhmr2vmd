@@ -20,7 +20,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
         scene = context.scene
         props = scene.rgbmocap_properties
         col = layout.column()
-        col.prop(props, 'folder', text='输出目录')
+        col.prop(props, 'folder', text='动作目录')
 
 
         row = col.row(align=True)
