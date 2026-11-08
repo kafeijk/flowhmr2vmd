@@ -185,18 +185,7 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             if props.finger_driver_mode == 'ENABLED':
                 finger_limits.apply_finger_drivers(armature, props, context.scene)
 
-        contacts = score.get('score', {}).get('contacts') or []
-        details = []
-        for label, row in (('左脚', contacts[0] if len(contacts) > 0 else None),
-                           ('右脚', contacts[1] if len(contacts) > 1 else None)):
-            if row:
-                details.append(f"{label}接触平均 {row.get('position_mean_mm', 0):.3f} mm / "
-                               f"p95 {row.get('position_p95_mm', 0):.3f} mm")
-        source_text = 'RGB MoCap 工程 ' + project['kind']
-        text = (f"来源：{source_text}。动作已写入骨架：{result['action']}，"
-                f"{result['frames']} 帧。")
-        if details:
-            text += ' ' + '；'.join(details) + '。'
+        text = (f"重定向成功，共{result['frames']} 帧。")
         if not has_upper1:
             text += ' 缺少 上半身1：其旋转已并入 上半身2。'
         if not has_toe:
@@ -209,10 +198,6 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         if result['skipped_toe']:
             self.report({'WARNING'},
                         '足先EX 位于付与链下，脚趾未单独打键，会跟随脚踝刚性运动。')
-        if result['muted']:
-            self.report({'WARNING'},
-                        f"已临时关闭 {len(set(result['muted']))} 根骨骼的 IK/付与约束，"
-                        '以便烘焙的 FK 动作在视口中生效。')
         return {'FINISHED'}
 
 
