@@ -70,8 +70,9 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         mapping = list(NATIVE_MAPPING)
         bones = armature.data.bones
         has_upper1 = bones.get('上半身1') is not None
-        has_toe = (bones.get('つま先.L') is not None and
-                   bones.get('つま先.R') is not None)
+        # 任一侧缺少 つま先 就按两侧都没有处理，只留一半没有意义。
+        has_toe = all(bones.get(f'つま先{side}') is not None
+                      for side in ('.L', '.R'))
         missing = [name for index, name in enumerate(mapping)
                    if index not in OPTIONAL_MAPPING_INDEX and
                    bones.get(name) is None]
@@ -156,7 +157,7 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         if not has_upper1:
             text += ' 缺少 上半身1：其旋转已并入 上半身2。'
         if not has_toe:
-            text += ' 缺少 つま先：脚趾旋转已丢弃。'
+            text += ' 缺少 つま先（任一侧缺失按两侧处理）：两侧脚趾旋转已丢弃。'
         self.report({'INFO'}, text)
         if score.get('pt_fallback'):
             self.report({'WARNING'},
