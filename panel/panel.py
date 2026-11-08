@@ -2,6 +2,7 @@
 import bpy
 
 from ..core.finger_limits import FINGER_GROUPS
+from ..operators.bone_operators import get_bone_progress
 
 
 class RGBMOCAP_PT_panel(bpy.types.Panel):
@@ -59,3 +60,28 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
 
         row = col.row(align=True)
         row.operator('rgbmocap.retarget_smplh', text='执行', icon='PLAY')
+
+
+class RGBMOCAP_PT_tools(bpy.types.Panel):
+    bl_label = '小功能'
+    bl_idname = 'RGBMOCAP_PT_tools'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'VMD Retarget'
+    bl_order = 1
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        col = layout.column()
+        col.operator('rgbmocap.standardize', text='标准化', icon='BONE_DATA')
+        col.operator('rgbmocap.fk_to_ik', text='FK->IK',
+                     icon='ARMATURE_DATA')
+        progress = get_bone_progress()
+        if progress['active']:
+            if hasattr(col, 'progress'):
+                col.progress(factor=progress['factor'], type='BAR',
+                             text=progress['text'])
+            else:
+                col.label(text=progress['text'])
