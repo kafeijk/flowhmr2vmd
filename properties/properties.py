@@ -82,6 +82,9 @@ def _update_driver(self, context):
 def _update_enabled(self, context):
     armature = _active_armature(context)
     if self.finger_limits_mode != 'ENABLED':
+        # 先关闭驱动器（同时恢复约束范围），再删除手指约束。
+        if self.finger_driver_mode == 'ENABLED':
+            self.finger_driver_mode = 'DISABLED'
         if armature is not None:
             finger_limits.remove_finger_drivers(armature)
             finger_limits.remove_finger_limits(armature)
@@ -95,8 +98,6 @@ def _update_enabled(self, context):
         self.finger_limits_mode = 'DISABLED'
         return
     _apply(self, context, armature)
-    if self.finger_driver_mode == 'ENABLED':
-        finger_limits.apply_finger_drivers(armature, self, context.scene)
 
 
 class RGBMOCAP_Properties(bpy.types.PropertyGroup):

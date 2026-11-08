@@ -35,6 +35,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
             row.prop(props, 'finger_limits_mode', expand=True)
             row = inner.row(align=True)
             row.prop(props, 'finger_driver_mode', expand=True)
+            row.enabled = props.finger_limits_mode == 'ENABLED'
             inner.separator()
 
             for label, prefix in FINGER_GROUPS:
