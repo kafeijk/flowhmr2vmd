@@ -390,6 +390,12 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
                       '并把无权重 つま先 的旋转交给 足先EX，清除原通道')
     bl_options = {'REGISTER', 'UNDO'}
 
+    rotate_toe: bpy.props.BoolProperty(
+        name='旋转脚尖',
+        description='把无权重的 つま先 旋转转换到 足先EX',
+        default=False,
+    )
+
     def check_props(self, context):
         obj = context.active_object
         if obj is None or obj not in context.selected_objects:
@@ -417,7 +423,8 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
         if checked is None:
             return {'CANCELLED'}
         armature, action = checked
-        _transfer_toe_rotation(action, armature)
+        if self.rotate_toe:
+            _transfer_toe_rotation(action, armature)
         _move_standardize_channels(action, armature)
         _reset_transferred_pose(armature)
         context.view_layer.update()
