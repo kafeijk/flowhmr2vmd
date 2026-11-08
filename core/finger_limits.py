@@ -123,74 +123,89 @@ def remove_finger_limits(armature):
     return count
 
 
-# 中指 / 薬指第一节互相防交叉，左侧与右侧各一对（双向）。
-PAIRED_FINGERS = (
-    ('中指１.L', '薬指１.L', 'index1'),
-    ('薬指１.L', '中指１.L', 'index1'),
-    ('中指１.R', '薬指１.R', 'index1'),
-    ('薬指１.R', '中指１.R', 'index1'),
-)
-
+# 同一只手的第 1 节手指链：相邻两根之间都做 Z 角度差限制。
+FINGER_CHAIN = ('人指１', '中指１', '薬指１', '小指１')
+SIDES = ('.L', '.R')
 DRIVER_LIMIT = math.radians(15.0)
 
 
-def apply_finger_drivers(armature, props, scene):
-    """让中指与薬指第一节的 Z 角度差保持在 ±15° 内。
+def _neighbors(index):
+    names = []
+    if index > 0:
+        names.append(FINGER_CHAIN[index - 1])
+    if index + 1 < len(FINGER_CHAIN):
+        names.append(FINGER_CHAIN[index + 1])
+    return names
 
-    本骨骼的上下限都跟着另一根手指的当前角度走，因此既不会越过对方
-    造成交叉，也不会向两侧张开成明显的 V 形；最终范围再受面板值限制。
+
+def apply_finger_drivers(armature, props, scene):
+    """限制相邻第 1 节手指的 Z 角度差在 ±15° 内。
+
+    每根手指同时参考左右相邻手指的当前角度：不会越过邻居造成交叉，
+    也不会张开成明显的 V 形；最终范围再受面板上的食指 Z 范围限制。
     """
     count = 0
-    for target, source, prefix in PAIRED_FINGERS:
-        target_bone = armature.pose.bones.get(target)
-        source_bone = armature.pose.bones.get(source)
-        if target_bone is None or source_bone is None:
-            continue
-        constraint = target_bone.constraints.get(FINGER_CONSTRAINT_NAME)
-        if constraint is None:
-            continue
-        for attribute in ('min_z', 'max_z'):
-            constraint.driver_remove(attribute)
-        for attribute, bound, offset in (('min_z', 'z_min', -DRIVER_LIMIT),
-                                         ('max_z', 'z_max', DRIVER_LIMIT)):
-            fcurve = constraint.driver_add(attribute)
-            driver = fcurve.driver
-            driver.type = 'SCRIPTED'
-            for name, component in (('qw', 0), ('qz', 3)):
-                variable = driver.variables.new()
-                variable.name = name
-                variable.type = 'SINGLE_PROP'
-                variable.targets[0].id_type = 'OBJECT'
-                variable.targets[0].id = armature
-                variable.targets[0].data_path = (
-                    f'pose.bones["{source}"].rotation_quaternion[{component}]')
-            for name, bound_name in (('lo', f'{prefix}_z_min'),
-                                     ('hi', f'{prefix}_z_max')):
-                variable = driver.variables.new()
-                variable.name = name
-                variable.type = 'SINGLE_PROP'
-                variable.targets[0].id_type = 'SCENE'
-                variable.targets[0].id = scene
-                variable.targets[0].data_path = props.path_from_id(bound_name)
-            angle = '2*atan2(qz, abs(qw))'
-            if offset < 0:
-                driver.expression = f'max(lo, ({angle} - {DRIVER_LIMIT}))'
-            else:
-                driver.expression = f'min(hi, ({angle} + {DRIVER_LIMIT}))'
-            count += 1
+    for suffix in SIDES:
+        for index, base in enumerate(FINGER_CHAIN):
+            bone = armature.pose.bones.get(base + suffix)
+            if bone is None:
+                continue
+            constraint = bone.constraints.get(FINGER_CONSTRAINT_NAME)
+            if constraint is None:
+                continue
+            sources = [name + suffix for name in _neighbors(index)
+                       if armature.pose.bones.get(name + suffix) is not None]
+            if not sources:
+                continue
+            for attribute in ('min_z', 'max_z'):
+                constraint.driver_remove(attribute)
+            for attribute, bound, offset in (('min_z', 'z_min', -DRIVER_LIMIT),
+                                             ('max_z', 'z_max', DRIVER_LIMIT)):
+                fcurve = constraint.driver_add(attribute)
+                driver = fcurve.driver
+                driver.type = 'SCRIPTED'
+                angles = []
+                for i, source in enumerate(sources):
+                    for name, component in ((f'qw{i}', 0), (f'qz{i}', 3)):
+                        variable = driver.variables.new()
+                        variable.name = name
+                        variable.type = 'SINGLE_PROP'
+                        variable.targets[0].id_type = 'OBJECT'
+                        variable.targets[0].id = armature
+                        variable.targets[0].data_path = (
+                            f'pose.bones["{source}"].rotation_quaternion[{component}]')
+                    angles.append(f'2*atan2(qz{i}, abs(qw{i}))')
+                for name, bound_name in (('lo', 'index1_z_min'),
+                                         ('hi', 'index1_z_max')):
+                    variable = driver.variables.new()
+                    variable.name = name
+                    variable.type = 'SINGLE_PROP'
+                    variable.targets[0].id_type = 'SCENE'
+                    variable.targets[0].id = scene
+                    variable.targets[0].data_path = props.path_from_id(bound_name)
+                if offset < 0:
+                    terms = ', '.join(f'({angle} - {DRIVER_LIMIT})'
+                                      for angle in angles)
+                    driver.expression = f'max(lo, {terms})'
+                else:
+                    terms = ', '.join(f'({angle} + {DRIVER_LIMIT})'
+                                      for angle in angles)
+                    driver.expression = f'min(hi, {terms})'
+                count += 1
     return count
 
 
 def remove_finger_drivers(armature):
     count = 0
-    for target, _source, _prefix in PAIRED_FINGERS:
-        bone = armature.pose.bones.get(target)
-        if bone is None:
-            continue
-        constraint = bone.constraints.get(FINGER_CONSTRAINT_NAME)
-        if constraint is None:
-            continue
-        for attribute in ('min_z', 'max_z'):
-            if constraint.driver_remove(attribute):
-                count += 1
+    for suffix in SIDES:
+        for base in FINGER_CHAIN:
+            bone = armature.pose.bones.get(base + suffix)
+            if bone is None:
+                continue
+            constraint = bone.constraints.get(FINGER_CONSTRAINT_NAME)
+            if constraint is None:
+                continue
+            for attribute in ('min_z', 'max_z'):
+                if constraint.driver_remove(attribute):
+                    count += 1
     return count
