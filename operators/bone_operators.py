@@ -155,21 +155,32 @@ def _write_back_leg_ik(armature, records):
 
 
 def _remove_leg_fcurves(armature):
+    """清理腿部 FK 通道。
+
+    膝盖的旋转由 ひざ 的 IK 完全接管，删掉后导出 VMD 时 MMD 不会再先
+    吃一遍 FK 旋转、导致膝盖方向与 Blender 不一致。
+    大腿（足）、足首 与脚趾的关键帧保留：足/足首 的旋转是 IK 的弯曲平面
+    与脚掌 roll 参考，脚趾旋转决定脚尖姿态。
+    """
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return
     rotation_paths = ('rotation_quaternion', 'rotation_euler',
                       'rotation_axis_angle')
+    chain = [f'{name}{side}' for side in ('.L', '.R')
+             for name in ('ひざ', '足首', 'つま先', '足先EX')]
+    ik_driven = {f'ひざ{side}' for side in ('.L', '.R')}
     for fcurve in list(action.fcurves):
         path = fcurve.data_path
-        for side in ('.L', '.R'):
-            for name in (f'ひざ{side}', f'足首{side}', f'足先EX{side}'):
-                if not path.startswith(f'pose.bones["{name}"]'):
-                    continue
-                if path.endswith(rotation_paths):
-                    continue
+        owner = next((name for name in chain
+                      if path.startswith(f'pose.bones["{name}"]')), None)
+        if owner is None:
+            continue
+        if path.endswith(rotation_paths):
+            if owner in ik_driven:
                 action.fcurves.remove(fcurve)
-                break
+            continue
+        action.fcurves.remove(fcurve)
 
 
 _CENTER_BONE = 'センター'
