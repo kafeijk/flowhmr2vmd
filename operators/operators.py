@@ -95,8 +95,14 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             self.report({'ERROR'}, '在 PMX Root 下未找到骨架。')
             return {'CANCELLED'}
 
+        saved_location = root.location.copy()
         _reset_to_rest(root, armature)
+        result = self._run(context, path, project, source, root, armature,
+                           props)
+        root.location = saved_location
+        return result
 
+    def _run(self, context, path, project, source, root, armature, props):
         mapping = list(NATIVE_MAPPING)
         bones = armature.data.bones
         has_upper1 = bones.get('上半身1') is not None
