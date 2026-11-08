@@ -20,7 +20,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
         scene = context.scene
         props = scene.rgbmocap_properties
         col = layout.column()
-        col.prop(props, 'folder', text='NPZ 文件夹')
+        col.prop(props, 'folder', text='输出目录')
         col.prop(props, 'mapping', text='骨骼名称映射')
         row = col.row(align=True)
         row.prop(props, 'show_finger_limits', text='展开手指骨骼设置')

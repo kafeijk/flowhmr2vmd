@@ -26,8 +26,8 @@ def _python_candidates(folder):
     folder = Path(folder)
     base = folder
     for _ in range(0, 8):
-        for rel in ('python.exe', 'Scripts/python.exe', 'venv/Scripts/python.exe',
-                    '.venv/Scripts/python.exe'):
+        for rel in ('python.exe', 'envs/python.exe', 'Scripts/python.exe',
+                    'venv/Scripts/python.exe', '.venv/Scripts/python.exe'):
             path = base / rel
             if path.is_file():
                 yield path
@@ -118,10 +118,6 @@ def write_request(path, source, target_rest, target_names, geometry,
         'names_json': np.array(json.dumps(
             dict(source=list(source_names), target=list(target_names)), ensure_ascii=False)),
     }
-    if 'neutral_vertices' in source:
-        payload['neutral_vertices'] = source['neutral_vertices'].astype(np.float64)
-        payload['neutral_weights'] = source['neutral_weights'].astype(np.float64)
-        payload['native_world'] = source['native_world'].astype(np.float64)
     if source.get('neutral') is not None:
         payload['source_neutral'] = np.asarray(source['neutral'], np.float64)
     if source.get('raw_file'):
@@ -129,6 +125,8 @@ def write_request(path, source, target_rest, target_names, geometry,
     if project:
         payload['project_model_path'] = np.array(str(project['model_path']))
         payload['project_pt_path'] = np.array(str(project['pt_path']))
+        if project.get('origin') is not None:
+            payload['source_origin'] = np.asarray(project['origin'], np.float64)
     for key, value in geometry.items():
         payload[key] = np.asarray(value)
     np.savez(path, **payload)

@@ -15,6 +15,17 @@ from scipy.spatial.transform import Rotation as R
 ADDON = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ADDON / 'vendor'))
 
+
+def fs_path(path):
+    """Windows long-path prefix for FlowHMR output folders with long titles."""
+    path = str(path)
+    if os.name != 'nt' or path.startswith('\\\\?\\'):
+        return path
+    absolute = os.path.abspath(path)
+    if len(absolute) > 259:
+        return '\\\\?\\' + absolute
+    return path
+
 from mocap import solver as m
 from mocap import calibration as calib
 from mocap import measured
@@ -67,7 +78,7 @@ def enforce_foot_spacing(fixed, rest, ratio=0.65):
 
 def build_evidence(raw_path, points, native, neutral_rest, vertices, fps):
     """按原项目 source.prepare 的方式生成腿部表面证据 F / F0。"""
-    raw = np.load(raw_path, mmap_mode='r')
+    raw = np.load(fs_path(raw_path), mmap_mode='r')
     try:
         endpoints = source_surface.native_endpoints(raw)
     finally:
@@ -108,51 +119,47 @@ def main():
                    if 'source_neutral' in request.files else None)
         target_rest = request['target_rest'].astype(np.float64)
         lock_toes = bool(request['lock_toes'])
-        source_mode = str(request['source_mode']) if 'source_mode' in request.files else 'final'
+        source_mode = str(request['source_mode']) if 'source_mode' in request.files else 'project'
         use_project_pt = bool(request['use_project_pt']) if 'use_project_pt' in request.files else False
         raw_path = (str(request['project_raw_path'])
                     if 'project_raw_path' in request.files else '')
+        origin = (request['source_origin'].astype(np.float64)
+                  if 'source_origin' in request.files else np.zeros(3))
         pt_fallback = ''
 
-        if source_mode == 'project':
-            # rig.npy stores float32 world matrices; project them onto SO(3)
-            # exactly like RGB MoCap's source.prepare does.
-            world = R.from_matrix(world.reshape(-1, 3, 3)).as_matrix().reshape(
-                len(world), 22, 3, 3)
-            model = np.load(str(request['project_model_path']), allow_pickle=True)
-            betas = np.zeros(16, np.float64)
-            native = world.copy()
-            if use_project_pt:
-                try:
-                    import torch
-                    params = torch.load(str(request['project_pt_path']),
-                                        map_location='cpu', weights_only=False)
-                    betas = (params['shapes'].detach().cpu().numpy()
-                             .reshape(-1)[:16].astype(np.float64))
-                    rot6d = (params['rot6d'].detach().cpu().numpy()
-                             .reshape(len(world), 52, 3, 2).astype(np.float64))
-                    u = rot6d[..., 0]
-                    v = rot6d[..., 1] - (u * rot6d[..., 1]).sum(-1, keepdims=True) * u
-                    v /= np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
-                    w = np.cross(u, v)
-                    native = np.stack([u, v, w], -1)[:, :22]
-                    for joint in range(1, 22):
-                        parent = m.PARENTS[joint]
-                        if parent >= 0:
-                            native[:, joint] = native[:, parent] @ native[:, joint]
-                except Exception as exc:
-                    pt_fallback = str(exc)
-                    betas = np.zeros(16, np.float64)
-                    native = world.copy()
-            vertices = (model['v_template'] +
-                        np.einsum('vck,k->vc', model['shapedirs'][:, :, :16], betas))
-            weights = model['weights']
-            neutral_rest = (model['J_regressor'] @ vertices)[:22]
-        else:
-            native = request['native_world'].astype(np.float64)
-            vertices = request['neutral_vertices']
-            weights = request['neutral_weights']
-            neutral_rest = rest
+        # rig.npy stores float32 world matrices; project them onto SO(3)
+        # exactly like RGB MoCap's source.prepare does.
+        world = R.from_matrix(world.reshape(-1, 3, 3)).as_matrix().reshape(
+            len(world), 22, 3, 3)
+        model = np.load(fs_path(str(request['project_model_path'])), allow_pickle=True)
+        betas = np.zeros(16, np.float64)
+        native = world.copy()
+        if use_project_pt:
+            try:
+                import torch
+                params = torch.load(fs_path(str(request['project_pt_path'])),
+                                    map_location='cpu', weights_only=False)
+                betas = (params['shapes'].detach().cpu().numpy()
+                         .reshape(-1)[:16].astype(np.float64))
+                rot6d = (params['rot6d'].detach().cpu().numpy()
+                         .reshape(len(world), 52, 3, 2).astype(np.float64))
+                u = rot6d[..., 0]
+                v = rot6d[..., 1] - (u * rot6d[..., 1]).sum(-1, keepdims=True) * u
+                v /= np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
+                w = np.cross(u, v)
+                native = np.stack([u, v, w], -1)[:, :22]
+                for joint in range(1, 22):
+                    parent = m.PARENTS[joint]
+                    if parent >= 0:
+                        native[:, joint] = native[:, parent] @ native[:, joint]
+            except Exception as exc:
+                pt_fallback = str(exc)
+                betas = np.zeros(16, np.float64)
+                native = world.copy()
+        vertices = (model['v_template'] +
+                    np.einsum('vck,k->vc', model['shapedirs'][:, :, :16], betas))
+        weights = model['weights']
+        neutral_rest = (model['J_regressor'] @ vertices)[:22]
 
         if lock_toes:
             world[:, 10] = world[:, 7]
@@ -191,24 +198,34 @@ def main():
         root = points[:, 0, :] * ratio
         root[:, 1] += target_rest[0, 1] - rest[0, 1] * ratio
         positions, rotations = m.fk(local, target_rest, root)
-        base = dict(local=local, root=root, points=positions, world=rotations,
-                    rest=target_rest, names=np.array(target_names),
-                    ratio=ratio, **calibration)
+        raw = dict(local=local, root=root, points=positions, world=rotations,
+                   rest=target_rest, names=np.array(target_names),
+                   ratio=ratio, **calibration)
+        # 与原项目 pipeline 一致：先用 native 旋转重建身体链，再用 FBX 静息
+        # 参考系重新基准化腿部，最后才做接触修正。
+        base, _seed = m.characterize(raw, raw, source, native)
         if neutral is not None:
-            # 与原项目 pipeline 一致：用源骨架的 FBX 静息矩阵把腿部旋转
-            # 重新基准化到目标骨架的“垂直向下”参考系。
             want = calib.desired(world, neutral, target_rest)
-            rotations[:, [1, 2, 4, 5]] = want[:, [1, 2, 4, 5]]
-            local = m.local_from_world(rotations)
-            positions, rotations = m.fk(local, target_rest, root)
-            base.update(local=local, points=positions, world=rotations)
+            base['world'][:, [1, 2, 4, 5]] = want[:, [1, 2, 4, 5]]
+        base['local'] = m.local_from_world(base['world'])
+        base['points'], base['world'] = m.fk(base['local'], target_rest,
+                                             base['root'])
+        reference_points = base['points'].copy()
+        safe_cache = {}
+        original_safe = m.source_safe_reach
+        original_two = m.two_bone
+
+        def safe_reach(rest_value, src, side):
+            return original_safe(rest_value, dict(
+                src, points=reference_points, _safe_reach=safe_cache), side)
+
+        def two_bone(base_data, root_value, goals, planned, src):
+            return original_two(base_data, root_value, goals, planned,
+                                dict(src, world=base_data['world']))
+
+        m.source_safe_reach = safe_reach
+        m.two_bone = two_bone
         fixed, plan, diagnostic = m.refine(base, source, active, geo)
-        if source_mode == 'project':
-            # rig.npy 的关节世界姿态沿骨段建立坐标系，与 final.npz 的纯动作
-            # 增量不同约定。直接套用静止段方向会把头部的静息前倾当成动作
-            # 偏移，导致角色低头；这里改用“头相对颈部”的旋转驱动目标头部。
-            relative = world[:, 15] @ np.transpose(world[:, 12], (0, 2, 1))
-            fixed['world'][:, 15] = fixed['world'][:, 12] @ relative
 
         label = 'motion'
         kind = 'motion'
@@ -217,7 +234,7 @@ def main():
         np.savez(output / f'{label}-source.npz',
                  names=np.array(source_names), parents=m.PARENTS,
                  rest=rest, points=points, world=world,
-                 local=m.local_from_world(world), origin=np.zeros(3),
+                 local=m.local_from_world(world), origin=origin,
                  fps=np.array(float(fps)))
         np.savez(output / f'{label}-source-neutral.npz',
                  vertices=vertices, weights=weights, rest=neutral_rest,
@@ -306,8 +323,13 @@ def main():
         fixed = current
         enforce_foot_spacing(fixed, target_rest)
         score = m.score(fixed, source, active, geo, plan)
-        np.savez(output / 'stance.npz', root=fixed['root'], world=fixed['world'],
-                 local=fixed['local'], points=fixed['points'], rest=target_rest,
+        m.source_safe_reach = original_safe
+        m.two_bone = original_two
+        # 与原项目一致：把源坐标原点加回去，得到绝对骨架位置。
+        stance_root = fixed['root'] + origin
+        stance_points = fixed['points'] + origin
+        np.savez(output / 'stance.npz', root=stance_root, world=fixed['world'],
+                 local=fixed['local'], points=stance_points, rest=target_rest,
                  names=np.array(target_names), ratio=ratio)
         (output / 'score.json').write_text(json.dumps(dict(
             score=score, ratio=ratio, frames=int(len(root)),

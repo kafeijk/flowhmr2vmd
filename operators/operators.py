@@ -11,7 +11,7 @@ from ..core.constants import A, MAPPING_ITEMS, mapping_for
 class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
     bl_idname = 'rgbmocap.retarget_smplh'
     bl_label = '执行 VMD 重定向'
-    bl_description = '从 final.npz 或 RGB MoCap 工程缓存生成动作，直接写入选中 MMD 模型骨架的关键帧'
+    bl_description = '读取 final.npz 标记的 toyxyz / RGB MoCap 工程缓存，直接写入选中 MMD 模型骨架的关键帧'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -20,7 +20,7 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         folder = bpy.path.abspath(getattr(props, 'folder', '') if props else '')
         mapping_kind = getattr(props, 'mapping', 'FALLBACK') if props else 'FALLBACK'
         if not folder:
-            self.report({'ERROR'}, '请选择包含 final.npz 的文件夹。')
+            self.report({'ERROR'}, '请选择包含 final.npz 与 toyxyz 工程缓存的输出目录。')
             return {'CANCELLED'}
         from pathlib import Path
         path = Path(folder)
@@ -29,35 +29,27 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             return {'CANCELLED'}
 
         final_path = smplh.find_final_npz(path)
-        project = None
-        final = None
-        fkdata = None
-        if final_path is not None:
-            try:
-                final = smplh.load_final(final_path)
-            except smplh.SourceError as exc:
-                self.report({'ERROR'}, str(exc))
-                return {'CANCELLED'}
-            model_path = smplh.find_smplh_model(path, final['gender'])
-            if model_path is None:
-                self.report({'ERROR'},
-                            '未找到 SMPL-H 模型 model.npz。请把 FlowHMR 工具包的 '
-                            'app/flowhmr/assets/body_models/smplh/neutral/model.npz '
-                            '保留在输出目录的上级，或设置环境变量 RGBMOCAP_SMPLH_MODEL。')
-                return {'CANCELLED'}
-            try:
-                model = smplh.load_model(model_path)
-                fkdata = smplh.forward_kinematics(final, model)
-            except smplh.SourceError as exc:
-                self.report({'ERROR'}, str(exc))
-                return {'CANCELLED'}
-        else:
-            project = smplh.find_project(path)
-            if project is None:
+        project = smplh.find_project(path)
+        if project is None:
+            if final_path is None:
                 self.report({'ERROR'},
                             '在所选文件夹及其子文件夹中未找到 final.npz，'
                             '也未找到 corrected_initial_mixamo.json / initial_mixamo.json。')
-                return {'CANCELLED'}
+            else:
+                self.report({'ERROR'},
+                            f'找到 {final_path.name}，但缺少 toyxyz 工程缓存：需要 '
+                            'corrected_initial_mixamo.json、rig.npy、rig-asset.npz、'
+                            'surface.npy 和 SMPL-H model.npz。')
+            return {'CANCELLED'}
+        try:
+            source = smplh.prepare_project(project)
+        except smplh.SourceError as exc:
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        if not source.get('raw_file'):
+            self.report({'WARNING'},
+                        '工程缺少 surface 文件（raw_file），将跳过表面证据阶段，'
+                        '脚部效果与 toyxyz 不完全一致。')
 
         selected = list(context.selected_objects)
         obj = context.active_object if context.active_object in selected else (
@@ -79,10 +71,20 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         mapping = mapping_for(mapping_kind)
         message = mmd.validate_mapping(armature, mapping)
         if message:
-            label = dict((key, name) for key, name, _ in MAPPING_ITEMS)[
-                mapping_kind]
-            self.report({'ERROR'}, f'{message}（当前对照：{label}）')
-            return {'CANCELLED'}
+            # 选错模式时自动回退到能用的那一套，避免模型缺 上半身1/つま先
+            # 时直接失败；能支持的模型优先用原生映射。
+            other = 'FALLBACK' if mapping_kind == 'NATIVE' else 'NATIVE'
+            alternative = mapping_for(other)
+            if mmd.validate_mapping(armature, alternative) is None:
+                mapping_kind = other
+                mapping = alternative
+                self.report({'INFO'},
+                            f'当前模型不支持所选映射，已自动改用 {other}：{message}')
+            else:
+                label = dict((key, name) for key, name, _ in MAPPING_ITEMS)[
+                    mapping_kind]
+                self.report({'ERROR'}, f'{message}（当前对照：{label}）')
+                return {'CANCELLED'}
 
         meshes = mmd.meshes_for(armature)
         rest = np.empty((22, 3), np.float64)
@@ -105,16 +107,7 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
 
-        if project is None:
-            source = smplh.prepare_source(final, fkdata, lock_toes=lock_toes)
-            request_project = None
-        else:
-            try:
-                source = smplh.prepare_project(project)
-            except smplh.SourceError as exc:
-                self.report({'ERROR'}, str(exc))
-                return {'CANCELLED'}
-            request_project = source['project']
+        request_project = source['project']
         temp = solver_client.make_temp()
         try:
             request = temp / 'request.npz'
@@ -149,7 +142,7 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             if row:
                 details.append(f"{label}接触平均 {row.get('position_mean_mm', 0):.3f} mm / "
                                f"p95 {row.get('position_p95_mm', 0):.3f} mm")
-        source_text = ('RGB MoCap 工程 ' + project['kind']) if project else 'FlowHMR final.npz'
+        source_text = 'RGB MoCap 工程 ' + project['kind']
         text = (f"来源：{source_text}。动作已写入骨架：{result['action']}，"
                 f"{result['frames']} 帧。")
         if details:
