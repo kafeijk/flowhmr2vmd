@@ -54,15 +54,36 @@ def _remove_upper_body_children(context, armature_obj, root_name='上半身'):
 
 
 def _set_leg_ik(armature, enabled):
+    # 足首 的 IK（target つま先ＩＫ, chain 1）决定脚掌朝向，必须一起开关，
+    # 否则足ＩＫ 的旋转对脚不起作用。
     for side in ('.L', '.R'):
-        knee = armature.pose.bones.get(f'ひざ{side}')
-        if knee is None:
-            continue
-        for con in knee.constraints:
-            if con.type == 'IK':
-                con.mute = not enabled
-                if enabled:
-                    con.influence = 1.0
+        for name in (f'ひざ{side}', f'足首{side}'):
+            bone = armature.pose.bones.get(name)
+            if bone is None:
+                continue
+            for con in bone.constraints:
+                if con.type == 'IK':
+                    con.mute = not enabled
+                    if enabled:
+                        con.influence = 1.0
+
+
+_REST_CACHE = {}
+
+
+def _rest_matrices(armature):
+    """足ＩＫ / つま先ＩＫ 的世界静息朝向（按骨架数据名缓存）。"""
+    key = armature.data.name
+    cached = _REST_CACHE.get(key)
+    if cached is None:
+        cached = {}
+        for name in ('足ＩＫ.L', '足ＩＫ.R', 'つま先ＩＫ.L', 'つま先ＩＫ.R'):
+            bone = armature.data.bones.get(name)
+            if bone is not None:
+                cached[name] = (armature.matrix_world @
+                                bone.matrix_local).to_quaternion().to_matrix().to_4x4()
+        _REST_CACHE[key] = cached
+    return cached
 
 
 def _convert_frame(armature, scene, frame, records):
@@ -72,19 +93,31 @@ def _convert_frame(armature, scene, frame, records):
     for side in ('.L', '.R'):
         ankle = armature.pose.bones.get(f'足首{side}')
         ik = armature.pose.bones.get(f'足ＩＫ{side}')
-        if ankle is None or ik is None:
+        toe = armature.pose.bones.get(f'つま先ＩＫ{side}')
+        if ankle is None or ik is None or toe is None:
             continue
-        targets[side] = ankle.matrix.copy()
-    for side in ('.L', '.R'):
+        # 足ＩＫ 只负责把脚踝带到原位（位置），旋转保持自身静息朝向；
+        # 脚掌朝向导交给 つま先ＩＫ + 足首 的 IK，这样足ＩＫ 不需要补偿
+        # 与足首的静息差，也不会出现 head/tail 强行共线的大角度。
+        targets[side] = ((armature.matrix_world @ ankle.matrix).translation.copy(),
+                         (armature.matrix_world @ ankle.tail).copy())
+    if not targets:
+        return
+    world_inv = armature.matrix_world.inverted()
+    rest = _rest_matrices(armature)
+    for side, (head, tail) in targets.items():
         ik = armature.pose.bones.get(f'足ＩＫ{side}')
-        if ik is None or side not in targets:
-            continue
         ik.rotation_mode = 'QUATERNION'
-        ik.matrix = targets[side]
+        ik.matrix = world_inv @ (Matrix.Translation(head) @ rest[f'足ＩＫ{side}'])
+        bpy.context.view_layer.update()
+        toe = armature.pose.bones.get(f'つま先ＩＫ{side}')
+        toe.rotation_mode = 'QUATERNION'
+        toe.matrix = world_inv @ (Matrix.Translation(tail) @ rest[f'つま先ＩＫ{side}'])
         records[side].append((frame,
                               ik.location.copy(),
                               ik.rotation_quaternion.copy(),
-                              bool(ik.mmd_ik_toggle)))
+                              bool(ik.mmd_ik_toggle),
+                              toe.location.copy()))
     bpy.context.view_layer.update()
 
 
@@ -92,17 +125,19 @@ def _write_back_leg_ik(armature, records):
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return
-    channels = (
-        ('location', 3, lambda row: row[1]),
-        ('rotation_quaternion', 4, lambda row: row[2]),
-        ('mmd_ik_toggle', 1, lambda row: (row[3],)),
-    )
     for side, rows in records.items():
         if not rows:
             continue
         frames = [row[0] for row in rows]
-        for prop, count, getter in channels:
-            path = f'pose.bones["足ＩＫ{side}"].{prop}'
+        specs = (
+            (f'pose.bones["足ＩＫ{side}"].location', 3, lambda row: row[1]),
+            (f'pose.bones["足ＩＫ{side}"].rotation_quaternion', 4,
+             lambda row: row[2]),
+            (f'pose.bones["足ＩＫ{side}"].mmd_ik_toggle', 1,
+             lambda row: (row[3],)),
+            (f'pose.bones["つま先ＩＫ{side}"].location', 3, lambda row: row[4]),
+        )
+        for path, count, getter in specs:
             for fcurve in [fc for fc in action.fcurves
                            if fc.data_path == path]:
                 action.fcurves.remove(fcurve)
