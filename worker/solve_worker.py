@@ -20,6 +20,44 @@ from mocap.foot_calibration import corrected_world
 import mocap.foot_calibration as fc
 
 
+def enforce_foot_spacing(fixed, rest, ratio=0.65):
+    """把左右脚踝的水平间距抬到模型静止脚距的 ratio 倍。
+
+    只在双脚过度并拢（会互相穿模）的帧，绕髋部把整条腿向外旋转，
+    保持腿部姿势与接触；返回修改的帧数。
+    """
+    points = fixed['points']
+    world = fixed['world']
+    min_sep = ratio * float(np.linalg.norm(rest[7][[0, 2]] - rest[8][[0, 2]]))
+    separations = np.linalg.norm(
+        (points[:, 7] - points[:, 8])[:, [0, 2]], axis=1)
+    changed = 0
+    for frame in np.flatnonzero(separations < min_sep):
+        axis = (points[frame, 1] - points[frame, 2]).astype(np.float64)
+        axis[1] = 0.0
+        length = float(np.linalg.norm(axis))
+        if length < 1e-9:
+            continue
+        axis /= length
+        for side, (upper, lower, ankle) in enumerate(((1, 4, 7), (2, 5, 8))):
+            sign = 1.0 if side == 0 else -1.0
+            pad = (min_sep - separations[frame]) * 0.5 * sign
+            hip = points[frame, upper]
+            before = points[frame, ankle] - hip
+            after = points[frame, ankle] + axis * pad - hip
+            rotation = m.align(before, after)
+            for joint in (upper, lower, ankle):
+                world[frame, joint] = rotation @ world[frame, joint]
+        changed += 1
+    if changed:
+        local = m.local_from_world(world)
+        positions, rotations = m.fk(local, rest, fixed['root'])
+        fixed['local'] = local
+        fixed['world'] = rotations
+        fixed['points'] = positions
+    return changed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--request', required=True)
@@ -124,6 +162,7 @@ def main():
                     rest=target_rest, names=np.array(target_names),
                     ratio=ratio, **calibration)
         fixed, plan, diagnostic = m.refine(base, source, active, geo)
+        enforce_foot_spacing(fixed, target_rest)
         if source_mode == 'project':
             # rig.npy 的关节世界姿态沿骨段建立坐标系，与 final.npz 的纯动作
             # 增量不同约定。直接套用静止段方向会把头部的静息前倾当成动作
