@@ -8,6 +8,34 @@ from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 
 
+def _reset_to_rest(root, armature):
+    """把角色恢复到静置状态，保证每次重定向从同一基准开始。
+
+    会清掉上一次的动作、残留的 pose 变换、IK 开关关键帧，以及
+    root / 骨架对象的位置旋转；缩放保留（PMX 导入常带缩放）。
+    """
+    for obj in (root, armature):
+        if obj is None:
+            continue
+        obj.location = (0.0, 0.0, 0.0)
+        obj.rotation_mode = 'XYZ'
+        obj.rotation_euler = (0.0, 0.0, 0.0)
+        obj.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+        obj.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+    if armature.animation_data is not None:
+        armature.animation_data_clear()
+    for pose_bone in armature.pose.bones:
+        pose_bone.location = (0.0, 0.0, 0.0)
+        pose_bone.rotation_mode = 'QUATERNION'
+        pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+        pose_bone.rotation_euler = (0.0, 0.0, 0.0)
+        pose_bone.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+        pose_bone.scale = (1.0, 1.0, 1.0)
+        if hasattr(pose_bone, 'mmd_ik_toggle'):
+            pose_bone.mmd_ik_toggle = True
+    bpy.context.view_layer.update()
+
+
 class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
     bl_idname = 'rgbmocap.retarget_smplh'
     bl_label = '执行 VMD 重定向'
@@ -66,6 +94,8 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         if armature is None:
             self.report({'ERROR'}, '在 PMX Root 下未找到骨架。')
             return {'CANCELLED'}
+
+        _reset_to_rest(root, armature)
 
         mapping = list(NATIVE_MAPPING)
         bones = armature.data.bones
