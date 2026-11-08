@@ -323,6 +323,19 @@ def prepare_project(project):
     rest = np.asarray(asset['rest'], np.float64)[:22]
     rest52 = np.asarray(asset['rest'], np.float64)
     ends52 = np.asarray(asset['ends'], np.float64)
+    neutral = None
+    if 'fbx_rest_frames' in asset and 'fbx_display_frames' in asset:
+        neutral = (np.asarray(asset['fbx_rest_frames'][:22], np.float64) @
+                   np.swapaxes(
+                       np.asarray(asset['fbx_display_frames'][:22], np.float64),
+                       -1, -2))
+    raw_file = None
+    raw_name = project['metadata'].get('raw_file')
+    if isinstance(raw_name, str):
+        raw_path = Path(raw_name) if Path(raw_name).is_absolute() else (
+            Path(project['folder']) / raw_name)
+        if raw_path.is_file():
+            raw_file = str(raw_path)
     active = np.zeros((n, 4), bool)
     if project['contacts'] is not None:
         contacts = np.load(project['contacts'])
@@ -336,7 +349,8 @@ def prepare_project(project):
     return dict(
         world=world, points=points, rest=rest, active=active, fps=fps,
         frames52=frames.astype(np.float32), rest52=rest52, ends52=ends52,
-        fnames=names, source_names=names[:22],
+        fnames=names, source_names=names[:22], neutral=neutral,
+        raw_file=raw_file,
         project=dict(
             model_path=str(project['model_path']),
             pt_path=str(project['pt']) if project['pt'] is not None else '',

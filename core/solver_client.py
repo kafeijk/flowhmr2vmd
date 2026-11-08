@@ -122,6 +122,10 @@ def write_request(path, source, target_rest, target_names, geometry,
         payload['neutral_vertices'] = source['neutral_vertices'].astype(np.float64)
         payload['neutral_weights'] = source['neutral_weights'].astype(np.float64)
         payload['native_world'] = source['native_world'].astype(np.float64)
+    if source.get('neutral') is not None:
+        payload['source_neutral'] = np.asarray(source['neutral'], np.float64)
+    if source.get('raw_file'):
+        payload['project_raw_path'] = np.array(str(source['raw_file']))
     if project:
         payload['project_model_path'] = np.array(str(project['model_path']))
         payload['project_pt_path'] = np.array(str(project['pt_path']))
