@@ -6,6 +6,7 @@ import numpy as np
 
 from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
+from .bone_operators import convert_toe_rotation, standardize_channels
 
 
 def _reset_to_rest(root, armature):
@@ -172,6 +173,12 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
             return {'CANCELLED'}
         finally:
             shutil.rmtree(temp, ignore_errors=True)
+
+        # 重定向后自动把 腰 旋转与 全ての親 位移并入 センター。
+        standardize_channels(armature)
+        if (props is not None and props.rotate_toe_mode == 'ENABLED' and
+                has_toe):
+            convert_toe_rotation(armature, True)
 
         if props is not None and props.finger_limits_mode == 'ENABLED':
             finger_limits.apply_finger_limits(armature, props)

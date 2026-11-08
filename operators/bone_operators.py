@@ -330,43 +330,80 @@ def _move_standardize_channels(action, armature):
     return True
 
 
-def _transfer_toe_rotation(action, armature):
-    """把无权重的 つま先 旋转搬到有权重的 足先EX。
+def _convert_bone_rotation(action, armature, source_name, target_name):
+    """把 source_name 的旋转曲线按世界等价转到 target_name。
 
-    模3D 模型的 つま先 通常没有顶点权重，实际脚尖由 足先EX
-    （足首D 的付与骨骼）驱动。足首D 与 足首 刚性同步、つま先 是 足首 的
-    子骨骼，所以两边只差一个静息朝向的共轭变换，纯曲线求值即可，
-    不需要逐帧更新场景。
+    两条骨骼只差一个静息朝向的共轭变换：
+    q_target = R_target⁻¹ · R_source · q_source · R_source⁻¹ · R_target
+    纯曲线求值，不需要逐帧更新场景。
     """
+    source_path = f'pose.bones["{source_name}"].rotation_quaternion'
+    if not _curves(action, source_path):
+        return False
+    source_bone = armature.data.bones.get(source_name)
+    target_bone = armature.data.bones.get(target_name)
+    if source_bone is None or target_bone is None:
+        return False
     world_rotation = armature.matrix_world.to_quaternion()
-    moved = False
+    source_rest = world_rotation @ source_bone.matrix_local.to_quaternion()
+    target_rest = world_rotation @ target_bone.matrix_local.to_quaternion()
+    left = target_rest.inverted() @ source_rest
+    right = source_rest.inverted() @ target_rest
+    curves = _curve_map(action)
+    frames = sorted(_key_times(action, source_path))
+    quaternions = []
+    for frame in frames:
+        q_source = _quaternion_at(curves, source_path, frame)
+        quaternions.append((left @ q_source @ right).normalized())
+    if not quaternions:
+        return False
+    _write_curves(action, f'pose.bones["{target_name}"].rotation_quaternion',
+                  frames, [[q[i] for q in quaternions] for i in range(4)])
+    for prop in ('rotation_quaternion', 'rotation_euler',
+                 'rotation_axis_angle'):
+        _remove_curves(action, f'pose.bones["{source_name}"].{prop}')
+    source_pose = armature.pose.bones.get(source_name)
+    if source_pose is not None:
+        source_pose.rotation_mode = 'QUATERNION'
+        source_pose.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+        source_pose.rotation_euler = (0.0, 0.0, 0.0)
+        source_pose.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+    return True
+
+
+_TOE_BONES = ('つま先', '足先EX')
+
+
+def convert_toe_rotation(armature, enabled):
+    """在 つま先 与 足先EX 之间搬运旋转；返回 (成功, 错误信息)。
+
+    开启：つま先 → 足先EX；关闭：足先EX → つま先。
+    两侧骨骼必须齐全，缺一侧按两侧都缺处理；没有动作或没有可转换的
+    关键帧时静默跳过（这个开关只表示意图，不保证一定有数据）。
+    """
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return True, ''
+    bones = armature.data.bones
+    missing = [f'{stem}{side}' for side in ('.L', '.R') for stem in _TOE_BONES
+               if bones.get(f'{stem}{side}') is None]
+    if missing:
+        return False, '缺少骨骼：' + '、'.join(missing) + '（缺一即两侧都缺）'
+    source, target = ((_TOE_BONES[0], _TOE_BONES[1]) if enabled
+                      else (_TOE_BONES[1], _TOE_BONES[0]))
     for side in ('.L', '.R'):
-        toe_bone = armature.data.bones.get(f'つま先{side}')
-        ex_bone = armature.data.bones.get(f'足先EX{side}')
-        if toe_bone is None or ex_bone is None:
-            continue
-        toe_path = f'pose.bones["つま先{side}"].rotation_quaternion'
-        if not _curves(action, toe_path):
-            continue
-        toe_rest = (world_rotation @ toe_bone.matrix_local.to_quaternion())
-        ex_rest = (world_rotation @ ex_bone.matrix_local.to_quaternion())
-        left = ex_rest.inverted() @ toe_rest
-        right = toe_rest.inverted() @ ex_rest
-        curves = _curve_map(action)
-        frames = sorted(_key_times(action, toe_path))
-        quaternions = []
-        for frame in frames:
-            q_toe = _quaternion_at(curves, toe_path, frame)
-            quaternions.append((left @ q_toe @ right).normalized())
-        if not quaternions:
-            continue
-        _write_curves(action, f'pose.bones["足先EX{side}"].rotation_quaternion',
-                      frames, [[q[i] for q in quaternions] for i in range(4)])
-        for prop in ('rotation_quaternion', 'rotation_euler',
-                     'rotation_axis_angle'):
-            _remove_curves(action, f'pose.bones["つま先{side}"].{prop}')
-        moved = True
-    return moved
+        _convert_bone_rotation(action, armature, source + side, target + side)
+    return True, ''
+
+
+def standardize_channels(armature):
+    """把 腰 旋转与 全ての親 位移移到 センター（重定向后自动调用）。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    _move_standardize_channels(action, armature)
+    _reset_transferred_pose(armature)
+    return True
 
 
 def _reset_transferred_pose(armature):
@@ -387,14 +424,8 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
     bl_idname = 'rgbmocap.standardize'
     bl_label = '标准化'
     bl_description = ('把 腰 的旋转关键帧移到 センター，把 全ての親 的位移移到 センター，'
-                      '并把无权重 つま先 的旋转交给 足先EX，清除原通道')
+                      '并清除原通道')
     bl_options = {'REGISTER', 'UNDO'}
-
-    rotate_toe: bpy.props.BoolProperty(
-        name='旋转脚尖',
-        description='把无权重的 つま先 旋转转换到 足先EX',
-        default=False,
-    )
 
     def check_props(self, context):
         obj = context.active_object
@@ -423,14 +454,10 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
         if checked is None:
             return {'CANCELLED'}
         armature, action = checked
-        if self.rotate_toe:
-            _transfer_toe_rotation(action, armature)
         _move_standardize_channels(action, armature)
         _reset_transferred_pose(armature)
         context.view_layer.update()
-        self.report({'INFO'},
-                    '已把 腰 旋转与 全ての親 位移移动到 センター，'
-                    '并把 つま先 旋转交给 足先EX。')
+        self.report({'INFO'}, '已把 腰 旋转与 全ての親 位移移动到 センター。')
         return {'FINISHED'}
 
 

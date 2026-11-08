@@ -41,9 +41,9 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
         scene = context.scene
         props = scene.rgbmocap_properties
         col = layout.column()
-        col.operator('rgbmocap.standardize', text='标准化', icon='BONE_DATA')
-        col.operator('rgbmocap.fk_to_ik', text='FK->IK',
-                     icon='ARMATURE_DATA')
+        col.operator('rgbmocap.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
+        row = col.row(align=True)
+        row.prop(props, 'rotate_toe_mode', expand=True)
         progress = get_bone_progress()
         if progress['active']:
             if hasattr(col, 'progress'):

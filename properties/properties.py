@@ -4,6 +4,7 @@ import math
 import bpy
 
 from ..core import finger_limits, mmd
+from ..operators.bone_operators import convert_toe_rotation
 
 _LIMIT_MIN = math.radians(-180.0)
 _LIMIT_MAX = math.radians(180.0)
@@ -16,6 +17,11 @@ FINGER_LIMITS_MODE_ITEMS = (
 FINGER_DRIVER_MODE_ITEMS = (
     ('ENABLED', '启用', '创建中指 / 无名指约束驱动器'),
     ('DISABLED', '关闭', '删除约束驱动器并把约束恢复为面板范围'),
+)
+
+ROTATE_TOE_MODE_ITEMS = (
+    ('ENABLED', '开启', '把 つま先 的旋转转换到 足先EX'),
+    ('DISABLED', '关闭', '把 足先EX 的旋转转换回 つま先'),
 )
 
 
@@ -55,6 +61,43 @@ def _update_limit(self, context):
     if armature is None:
         return
     _apply(self, context, armature)
+
+
+_ROTATE_TOE_BUSY = False
+
+
+def _report_error(context, message):
+    try:
+        window_manager = context.window_manager
+
+        def draw(menu, _message=message):
+            menu.layout.label(text=_message, icon='ERROR')
+
+        window_manager.popup_menu(draw, title='脚尖旋转', icon='ERROR')
+    except Exception:
+        print('脚尖旋转:', message)
+
+
+def _update_rotate_toe(self, context):
+    """开启：つま先 → 足先EX；关闭：足先EX → つま先。"""
+    global _ROTATE_TOE_BUSY
+    if _ROTATE_TOE_BUSY:
+        return
+    armature = _active_armature(context) or _fallback_armature(context)
+    if armature is None:
+        _report_error(context, '请先选中 MMD 模型')
+        return
+    _ROTATE_TOE_BUSY = True
+    try:
+        ok, message = convert_toe_rotation(
+            armature, self.rotate_toe_mode == 'ENABLED')
+        if ok:
+            return
+        self.rotate_toe_mode = ('DISABLED' if self.rotate_toe_mode == 'ENABLED'
+                                else 'ENABLED')
+        _report_error(context, message)
+    finally:
+        _ROTATE_TOE_BUSY = False
 
 
 def _update_driver(self, context):
@@ -109,6 +152,13 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
         name='展开手指骨骼设置',
         description='展开后可在下方修改六组基础手指的 XYZ 最小/最大角度',
         default=False,
+    )
+    rotate_toe_mode: bpy.props.EnumProperty(
+        name='脚尖旋转',
+        description='开启时把 つま先 旋转交给 足先EX，关闭时反向交回 つま先',
+        items=ROTATE_TOE_MODE_ITEMS,
+        default='DISABLED',
+        update=_update_rotate_toe,
     )
     finger_limits_mode: bpy.props.EnumProperty(
         name='手指约束',
