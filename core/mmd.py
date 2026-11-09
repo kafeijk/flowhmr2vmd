@@ -1,8 +1,7 @@
 """MMD object discovery and skeleton validation.
 
-The public finders follow mmd_kafei_tools' API. If that GPL add-on is
-installed, its functions are imported at runtime; otherwise equivalent
-parent-walk helpers are used. No mmd_kafei_tools source is bundled here.
+Independent implementation: only depends on MMD Tools' ``mmd_type``
+property, no other add-ons are imported.
 
 Portions adapted from RGB MoCap (MIT License).
 """
@@ -13,29 +12,7 @@ def mmd_tools_enabled():
     return hasattr(bpy.types.Object, 'mmd_type')
 
 
-def _finders():
-    """Return (find_root_with_child, find_armature).
-
-    Prefer MMD Kafei Tools because the user asked to reuse its helpers.
-    The fallback is an independently written parent walk with identical
-    behaviour, so the add-on also works when Kafei Tools is not installed.
-    """
-    try:
-        from mmd_kafei_tools.utils import (find_pmx_armature,
-                                            find_pmx_root_with_child)
-        return find_pmx_root_with_child, find_pmx_armature
-    except Exception:
-        pass
-    try:
-        from addons.mmd_kafei_tools.utils import (find_pmx_armature,
-                                                   find_pmx_root_with_child)
-        return find_pmx_root_with_child, find_pmx_armature
-    except Exception:
-        pass
-    return _fallback_root, _fallback_armature
-
-
-def _fallback_root(child):
+def _find_root(child):
     parent = child
     while parent:
         if getattr(parent, 'mmd_type', None) == 'ROOT':
@@ -44,16 +21,17 @@ def _fallback_root(child):
     return None
 
 
-def _fallback_armature(root):
+def _find_armature(root):
     return next((o for o in root.children if o.type == 'ARMATURE'), None)
 
 
 def find_root_and_armature(obj):
-    find_root, find_armature = _finders()
-    root = find_root(obj)
+    if obj is None or not mmd_tools_enabled():
+        return None, None
+    root = _find_root(obj)
     if root is None:
         return None, None
-    return root, find_armature(root)
+    return root, _find_armature(root)
 
 
 STATE_ROTATE_TOE = 'flowhmr2vmd_rotate_toe'

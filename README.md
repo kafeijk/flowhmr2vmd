@@ -12,8 +12,6 @@
   - 接触解算在独立进程中运行，不依赖 Blender 内置 Python 是否带 scipy。
 - FlowHMR 的 SMPL-H 模型 `model.npz`，放在输出目录的上级，例如：
   `.../app/flowhmr/assets/body_models/smplh/neutral/model.npz`。
-- 可选：**MMD Kafei Tools**。安装后会直接调用它的
-  `find_pmx_root_with_child` / `find_pmx_armature`；未安装时使用等价的本地回退实现。
 
 ## 安装
 
@@ -97,5 +95,5 @@ XYZ 最小/最大角度（默认值对应左手指）：
 
 MIT License。部分算法与常量改编自
 [RGB MoCap](https://github.com/toyxyz/toyxyz_RGBMocap)（MIT）。
-MMD Tools 与可选的 MMD Kafei Tools 为 GPL-3.0-or-later，未随本插件分发。
+MMD Tools 为 GPL-3.0-or-later，未随本插件分发。
 详见 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`。
