@@ -2,7 +2,7 @@
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from ..core import mmd
+from ..core import finger_limits, mmd
 
 _BONE_PROGRESS = {
     'active': False,
@@ -700,4 +700,110 @@ class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
         props.finger_driver_mode = 'DISABLED'
         self.report({'INFO'},
                     f'已烘焙 {len(fingers)} 根手指骨骼（0..{frame_end} 帧）。')
+        return {'FINISHED'}
+
+
+_MODE_ITEMS = (
+    ('ENABLED', '开启', '执行开启操作'),
+    ('DISABLED', '关闭', '执行关闭操作'),
+)
+
+
+def _selected_armature(context):
+    selected = list(context.selected_objects)
+    obj = context.active_object if context.active_object in selected else (
+        selected[0] if selected else None)
+    if obj is None:
+        return None
+    root, armature = mmd.find_root_and_armature(obj)
+    return armature if root is not None else None
+
+
+class FLOWHMR2VMD_OT_rotate_toe(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.rotate_toe'
+    bl_label = '脚尖旋转'
+    bl_description = '开启时把 つま先 旋转交给 足先EX，关闭时反向交回 つま先'
+    bl_options = {'UNDO'}
+
+    mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
+                                 default='ENABLED')
+
+    def execute(self, context):
+        armature = _selected_armature(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        ok, message = convert_toe_rotation(armature, self.mode == 'ENABLED')
+        if not ok:
+            self.report({'ERROR'}, message)
+            return {'CANCELLED'}
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is not None:
+            props.rotate_toe_mode = self.mode
+        return {'FINISHED'}
+
+
+class FLOWHMR2VMD_OT_finger_limits(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.finger_limits'
+    bl_label = '手指约束'
+    bl_description = '开启时给手指骨骼添加限制旋转约束，关闭时删除本插件添加的约束'
+    bl_options = {'UNDO'}
+
+    mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
+                                 default='ENABLED')
+
+    def execute(self, context):
+        armature = _selected_armature(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is None:
+            return {'CANCELLED'}
+        if self.mode == 'ENABLED':
+            missing = [f'{base}{side}'
+                       for base in finger_limits.all_limits(props)
+                       for side in ('.L', '.R')
+                       if armature.pose.bones.get(base + side) is None]
+            if missing:
+                self.report({'ERROR'}, '骨架缺少手指骨骼：' + '、'.join(missing))
+                return {'CANCELLED'}
+            finger_limits.apply_finger_limits(armature, props)
+            props.finger_limits_mode = 'ENABLED'
+        else:
+            finger_limits.remove_finger_drivers(armature)
+            finger_limits.remove_finger_limits(armature)
+            props.finger_driver_mode = 'DISABLED'
+            props.finger_limits_mode = 'DISABLED'
+        return {'FINISHED'}
+
+
+class FLOWHMR2VMD_OT_finger_driver(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.finger_driver'
+    bl_label = '手指约束驱动器'
+    bl_description = '开启时给手指约束添加驱动器，关闭时移除驱动器并恢复面板范围'
+    bl_options = {'UNDO'}
+
+    mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
+                                 default='ENABLED')
+
+    def execute(self, context):
+        armature = _selected_armature(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is None:
+            return {'CANCELLED'}
+        if self.mode == 'ENABLED':
+            if props.finger_limits_mode != 'ENABLED':
+                self.report({'ERROR'}, '请先开启手指约束')
+                return {'CANCELLED'}
+            finger_limits.apply_finger_limits(armature, props)
+            finger_limits.apply_finger_drivers(armature, props, context.scene)
+            props.finger_driver_mode = 'ENABLED'
+        else:
+            finger_limits.remove_finger_drivers(armature)
+            finger_limits.apply_finger_limits(armature, props)
+            props.finger_driver_mode = 'DISABLED'
         return {'FINISHED'}

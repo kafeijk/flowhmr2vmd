@@ -5,6 +5,21 @@ from ..core.finger_limits import FINGER_GROUPS
 from ..operators.bone_operators import get_bone_progress
 
 
+def _toggle_row(layout, props, label, op_idname, prop_name):
+    """左侧固定宽度标签，右侧两个等宽按钮，保证多行对齐。"""
+    row = layout.row(align=True)
+    split = row.split(factor=0.4, align=True)
+    split.alignment = 'RIGHT'
+    split.label(text=label)
+    buttons = split.row(align=True)
+    halves = buttons.split(factor=0.5, align=True)
+    halves.operator(op_idname, text='开启',
+                    depress=getattr(props, prop_name) == 'ENABLED').mode = 'ENABLED'
+    halves.operator(op_idname, text='关闭',
+                    depress=getattr(props, prop_name) == 'DISABLED').mode = 'DISABLED'
+    return row
+
+
 class FLOWHMR2VMD_PT_panel(bpy.types.Panel):
     bl_label = 'VMD 动作重定向'
     bl_idname = 'FLOWHMR2VMD_PT_retarget'
@@ -42,8 +57,8 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
         props = scene.flowhmr2vmd_properties
         col = layout.column()
         col.operator('flowhmr2vmd.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
-        row = col.row(align=True)
-        row.prop(props, 'rotate_toe_mode', expand=True)
+        _toggle_row(col, props, '脚尖旋转', 'flowhmr2vmd.rotate_toe',
+                    'rotate_toe_mode')
         progress = get_bone_progress()
         if progress['active']:
             if hasattr(col, 'progress'):
@@ -63,10 +78,10 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
             inner = box.column()
             inner.use_property_decorate = False
 
-            row = inner.row(align=True)
-            row.prop(props, 'finger_limits_mode', expand=True)
-            row = inner.row(align=True)
-            row.prop(props, 'finger_driver_mode', expand=True)
+            _toggle_row(inner, props, '手指约束', 'flowhmr2vmd.finger_limits',
+                        'finger_limits_mode')
+            row = _toggle_row(inner, props, '手指约束驱动器',
+                              'flowhmr2vmd.finger_driver', 'finger_driver_mode')
             row.enabled = props.finger_limits_mode == 'ENABLED'
             row = inner.row(align=True)
             row.operator('flowhmr2vmd.bake_fingers', text='烘焙手指动作',

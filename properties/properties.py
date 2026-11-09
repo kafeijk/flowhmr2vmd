@@ -4,7 +4,6 @@ import math
 import bpy
 
 from ..core import finger_limits, mmd
-from ..operators.bone_operators import convert_toe_rotation
 
 _LIMIT_MIN = math.radians(-180.0)
 _LIMIT_MAX = math.radians(180.0)
@@ -63,68 +62,6 @@ def _update_limit(self, context):
     _apply(self, context, armature)
 
 
-_ROTATE_TOE_BUSY = False
-
-
-def _update_rotate_toe(self, context):
-    """开启：つま先 → 足先EX；关闭：足先EX → つま先；失败静默跳过。"""
-    global _ROTATE_TOE_BUSY
-    if _ROTATE_TOE_BUSY:
-        return
-    armature = _active_armature(context) or _fallback_armature(context)
-    if armature is None:
-        return
-    _ROTATE_TOE_BUSY = True
-    try:
-        convert_toe_rotation(armature, self.rotate_toe_mode == 'ENABLED')
-    finally:
-        _ROTATE_TOE_BUSY = False
-
-
-def _update_driver(self, context):
-    armature = _active_armature(context) or _fallback_armature(context)
-    if self.finger_driver_mode != 'ENABLED':
-        if armature is not None:
-            finger_limits.remove_finger_drivers(armature)
-            if self.finger_limits_mode == 'ENABLED':
-                finger_limits.apply_finger_limits(armature, self)
-        else:
-            for obj in context.scene.objects:
-                if obj.type == 'ARMATURE':
-                    finger_limits.remove_finger_drivers(obj)
-                    if self.finger_limits_mode == 'ENABLED':
-                        finger_limits.apply_finger_limits(obj, self)
-        return
-    if self.finger_limits_mode != 'ENABLED':
-        self.finger_driver_mode = 'DISABLED'
-        return
-    if armature is None:
-        self.finger_driver_mode = 'DISABLED'
-        return
-    finger_limits.apply_finger_drivers(armature, self, context.scene)
-
-
-def _update_enabled(self, context):
-    armature = _active_armature(context)
-    if self.finger_limits_mode != 'ENABLED':
-        # 先关闭驱动器（同时恢复约束范围），再删除手指约束。
-        if self.finger_driver_mode == 'ENABLED':
-            self.finger_driver_mode = 'DISABLED'
-        if armature is not None:
-            finger_limits.remove_finger_drivers(armature)
-            finger_limits.remove_finger_limits(armature)
-        else:
-            for obj in context.scene.objects:
-                if obj.type == 'ARMATURE':
-                    finger_limits.remove_finger_drivers(obj)
-                    finger_limits.remove_finger_limits(obj)
-        return
-    if armature is None:
-        self.finger_limits_mode = 'DISABLED'
-        return
-    _apply(self, context, armature)
-
-
 class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
         name='动作目录',
@@ -141,21 +78,18 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         description='开启后可使脚尖旋转，请根据实际效果来决定是否开启',
         items=ROTATE_TOE_MODE_ITEMS,
         default='DISABLED',
-        update=_update_rotate_toe,
     )
     finger_limits_mode: bpy.props.EnumProperty(
         name='手指约束',
-        description='启用时，为手指骨骼添加「限定旋转」约束，以修正手指异常弯曲的问题，但可能导致手指之间出现穿模，需进一步调整。关闭时，移除本插件添加的「限定旋转」约束',
+        description='开启时，为手指骨骼添加「限定旋转」约束，以修正手指异常弯曲的问题，但可能导致手指之间出现穿模，需进一步调整。关闭时，移除本插件添加的「限定旋转」约束',
         items=FINGER_LIMITS_MODE_ITEMS,
         default='DISABLED',
-        update=_update_enabled,
     )
     finger_driver_mode: bpy.props.EnumProperty(
         name='手指约束驱动器',
-        description='启用时，为手指骨骼约束添加驱动器，以缓解手指尖穿模的问题，但效果有限，可能仍需手动调整。关闭时，移除本插件添加的驱动器',
+        description='开启时，为手指骨骼约束添加驱动器，以缓解手指尖穿模的问题，但效果有限，可能仍需手动调整。关闭时，移除本插件添加的驱动器',
         items=FINGER_DRIVER_MODE_ITEMS,
         default='DISABLED',
-        update=_update_driver,
     )
 
     thumb0_x_min: bpy.props.FloatProperty(name='拇指0 X 最小', default=math.radians(-60.0),
