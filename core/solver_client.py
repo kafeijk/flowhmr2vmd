@@ -42,7 +42,7 @@ def _python_candidates(folder):
     preference = _preference_env()
     if preference:
         yield from _env_pythons(preference)
-    env = os.environ.get('RGBMOCAP_PYTHON')
+    env = os.environ.get('FLOWHMR2VMD_PYTHON')
     if env:
         yield Path(env)
     for name in ('python', 'python3'):
@@ -117,7 +117,7 @@ def run_solver(request, output, folder):
         raise SolverError(
             '未找到带 numpy/scipy 的 Python 解释器，无法进行脚部接触修正。'
             '请安装 Python 3 并执行 pip install numpy scipy，'
-            '或设置环境变量 RGBMOCAP_PYTHON 指向 python.exe。')
+            '或设置环境变量 FLOWHMR2VMD_PYTHON 指向 python.exe。')
     worker = Path(__file__).resolve().parents[1] / 'worker' / 'solve_worker.py'
     command = [str(python), str(worker), '--request', str(request),
                '--output', str(output)]
@@ -179,4 +179,4 @@ def read_stance(path):
 
 
 def make_temp():
-    return Path(tempfile.mkdtemp(prefix='rgbmocap_'))
+    return Path(tempfile.mkdtemp(prefix='flowhmr2vmd_'))

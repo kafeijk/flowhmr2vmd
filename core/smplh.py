@@ -39,7 +39,7 @@ def _candidate_models(folder, gender):
     folder = Path(folder)
     names = [gender, 'neutral']
     seen = set()
-    env = os.environ.get('RGBMOCAP_SMPLH_MODEL')
+    env = os.environ.get('FLOWHMR2VMD_SMPLH_MODEL')
     if env:
         yield Path(env)
     for depth in range(0, 8):

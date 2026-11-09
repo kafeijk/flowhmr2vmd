@@ -37,15 +37,15 @@ def _reset_to_rest(root, armature):
     bpy.context.view_layer.update()
 
 
-class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
-    bl_idname = 'rgbmocap.retarget_smplh'
+class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.retarget_smplh'
     bl_label = '执行 VMD 重定向'
     bl_description = '读取 final.npz 标记的 toyxyz / RGB MoCap 工程缓存，直接写入选中 MMD 模型骨架的关键帧'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         scene = context.scene
-        props = getattr(scene, 'rgbmocap_properties', None)
+        props = getattr(scene, 'flowhmr2vmd_properties', None)
         folder = bpy.path.abspath(getattr(props, 'folder', '') if props else '')
         if not folder:
             self.report({'ERROR'}, '请选择包含 final.npz 与 toyxyz 工程缓存的输出目录。')
@@ -201,14 +201,14 @@ class RGBMOCAP_OT_retarget_smplh(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class RGBMOCAP_OT_reset_finger_limits(bpy.types.Operator):
-    bl_idname = 'rgbmocap.reset_finger_limits'
+class FLOWHMR2VMD_OT_reset_finger_limits(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.reset_finger_limits'
     bl_label = '恢复默认手指约束'
     bl_description = '把所有手指角度范围恢复为默认值'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        props = getattr(context.scene, 'rgbmocap_properties', None)
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
         if props is None:
             self.report({'ERROR'}, '找不到插件属性。')
             return {'CANCELLED'}

@@ -5,9 +5,9 @@ from ..core.finger_limits import FINGER_GROUPS
 from ..operators.bone_operators import get_bone_progress
 
 
-class RGBMOCAP_PT_panel(bpy.types.Panel):
+class FLOWHMR2VMD_PT_panel(bpy.types.Panel):
     bl_label = 'VMD 动作重定向'
-    bl_idname = 'RGBMOCAP_PT_retarget'
+    bl_idname = 'FLOWHMR2VMD_PT_retarget'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'FlowHMR2VMD'
@@ -18,17 +18,17 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         scene = context.scene
-        props = scene.rgbmocap_properties
+        props = scene.flowhmr2vmd_properties
         col = layout.column()
         col.prop(props, 'folder', text='动作目录')
 
 
         row = col.row(align=True)
-        row.operator('rgbmocap.retarget_smplh', text='执行', icon='PLAY')
+        row.operator('flowhmr2vmd.retarget_smplh', text='执行', icon='PLAY')
 
-class RGBMOCAP_PT_tools(bpy.types.Panel):
+class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
     bl_label = '小功能'
-    bl_idname = 'RGBMOCAP_PT_tools'
+    bl_idname = 'FLOWHMR2VMD_PT_tools'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'FlowHMR2VMD'
@@ -39,9 +39,9 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         scene = context.scene
-        props = scene.rgbmocap_properties
+        props = scene.flowhmr2vmd_properties
         col = layout.column()
-        col.operator('rgbmocap.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
+        col.operator('flowhmr2vmd.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
         row = col.row(align=True)
         row.prop(props, 'rotate_toe_mode', expand=True)
         progress = get_bone_progress()
@@ -56,7 +56,7 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
         row.prop(props, 'show_finger_limits', text='展开手指骨骼设置')
         if props.show_finger_limits:
             refresh = row.row(align=True)
-            refresh.operator('rgbmocap.reset_finger_limits', text='', icon='FILE_REFRESH')
+            refresh.operator('flowhmr2vmd.reset_finger_limits', text='', icon='FILE_REFRESH')
 
         if props.show_finger_limits:
             box = col.box()
@@ -69,7 +69,7 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
             row.prop(props, 'finger_driver_mode', expand=True)
             row.enabled = props.finger_limits_mode == 'ENABLED'
             row = inner.row(align=True)
-            row.operator('rgbmocap.bake_fingers', text='烘焙手指动作',
+            row.operator('flowhmr2vmd.bake_fingers', text='烘焙手指动作',
                          icon='ACTION')
             inner.separator()
 

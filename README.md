@@ -8,7 +8,7 @@
 - **MMD Tools**：必须先启用。
 - **带 numpy + scipy 的 Python 3**：用于脚部接触解算。
   - 插件会自动在 `PATH`、Blender 自带 Python 和输出目录的上级目录中查找 `python.exe`。
-  - 找不到时可设置环境变量 `RGBMOCAP_SMPLH_MODEL` 指向 `model.npz`，或设置 `RGBMOCAP_PYTHON` 指向 `python.exe`。
+  - 找不到时可设置环境变量 `FLOWHMR2VMD_SMPLH_MODEL` 指向 `model.npz`，或设置 `FLOWHMR2VMD_PYTHON` 指向 `python.exe`。
   - 接触解算在独立进程中运行，不依赖 Blender 内置 Python 是否带 scipy。
 - FlowHMR 的 SMPL-H 模型 `model.npz`，放在输出目录的上级，例如：
   `.../app/flowhmr/assets/body_models/smplh/neutral/model.npz`。
@@ -31,8 +31,8 @@ flowhmr2vmd/
 ├─ __init__.py           auto_load 注册入口
 ├─ config.py            脚手架标识
 ├─ operators/           operators.py：总调度
-├─ panel/               panel.py：RGBMOCAP_PT_retarget
-├─ properties/          properties.py：RGBMOCAP_Properties（Scene PointerProperty）
+├─ panel/               panel.py：FLOWHMR2VMD_PT_retarget
+├─ properties/          properties.py：FLOWHMR2VMD_Properties（Scene PointerProperty）
 ├─ core/                constants / mmd / smplh / geometry / solver_client / bake
 ├─ worker/              solve_worker.py：外部 Python 解算入口
 └─ vendor/mocap/        RGB MoCap 解算模块（仅 worker 使用）
@@ -83,7 +83,7 @@ XYZ 最小/最大角度（默认值对应左手指）：
    - **兼容写法**：用 `上半身` 代替 `上半身1`，用 `足先EX` 代替 `つま先`；适用于大多数标准 MMD 模型。
 5. 点击 **执行**。
 
-成功后会生成 Action `RGBMoCap_SMPLH`，帧范围 1..N，帧率与源动作一致。
+成功后会生成 Action `FlowHMR2VMD`，帧范围 1..N，帧率与源动作一致。
 
 ## 行为说明
 

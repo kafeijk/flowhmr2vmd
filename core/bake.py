@@ -233,7 +233,7 @@ def bake_solution(armature, mapping, stance, source, skip_indices=()):
         pose_bone.keyframe_insert('rotation_quaternion', frame=1)
         if action is None:
             action = armature.animation_data.action
-            action.name = 'RGBMoCap_SMPLH'
+            action.name = 'FlowHMR2VMD'
         key_values(armature, pose_bone.path_from_id('rotation_quaternion'), q)
 
     root_pose = armature.pose.bones.get(root_name)
@@ -242,7 +242,7 @@ def bake_solution(armature, mapping, stance, source, skip_indices=()):
         root_pose.keyframe_insert('location', frame=1)
         if action is None:
             action = armature.animation_data.action
-            action.name = 'RGBMoCap_SMPLH'
+            action.name = 'FlowHMR2VMD'
         key_values(armature, root_pose.path_from_id('location'), root_location)
     if action is None:
         raise ValueError('没有可写入的骨骼通道。')

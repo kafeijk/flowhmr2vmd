@@ -20,7 +20,7 @@ def get_env_path():
         return ''
 
 
-class RGBMOCAP_AddonPreferences(bpy.types.AddonPreferences):
+class FLOWHMR2VMD_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = addon_module()
 
     env_path: bpy.props.StringProperty(

@@ -144,7 +144,7 @@ def _update_enabled(self, context):
     _apply(self, context, armature)
 
 
-class RGBMOCAP_Properties(bpy.types.PropertyGroup):
+class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
         name='动作目录',
         description='包含 final.npz 与 toyxyz / RGB MoCap 工程缓存的 FlowHMR 输出目录',
@@ -257,19 +257,19 @@ class RGBMOCAP_Properties(bpy.types.PropertyGroup):
 
     @staticmethod
     def register():
-        if not hasattr(bpy.types.Scene, 'rgbmocap_properties'):
-            bpy.types.Scene.rgbmocap_properties = bpy.props.PointerProperty(
-                type=RGBMOCAP_Properties)
+        if not hasattr(bpy.types.Scene, 'flowhmr2vmd_properties'):
+            bpy.types.Scene.flowhmr2vmd_properties = bpy.props.PointerProperty(
+                type=FLOWHMR2VMD_Properties)
 
     @staticmethod
     def unregister():
-        if hasattr(bpy.types.Scene, 'rgbmocap_properties'):
-            del bpy.types.Scene.rgbmocap_properties
+        if hasattr(bpy.types.Scene, 'flowhmr2vmd_properties'):
+            del bpy.types.Scene.flowhmr2vmd_properties
 
 
 def register():
-    RGBMOCAP_Properties.register()
+    FLOWHMR2VMD_Properties.register()
 
 
 def unregister():
-    RGBMOCAP_Properties.unregister()
+    FLOWHMR2VMD_Properties.unregister()

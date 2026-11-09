@@ -420,8 +420,8 @@ def _reset_transferred_pose(armature):
         master.location = (0.0, 0.0, 0.0)
 
 
-class RGBMOCAP_OT_standardize(bpy.types.Operator):
-    bl_idname = 'rgbmocap.standardize'
+class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.standardize'
     bl_label = '标准化'
     bl_description = ('把 腰 的旋转关键帧移到 センター，把 全ての親 的位移移到 センター，'
                       '并清除原通道')
@@ -461,8 +461,8 @@ class RGBMOCAP_OT_standardize(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class RGBMOCAP_OT_fk_to_ik(bpy.types.Operator):
-    bl_idname = 'rgbmocap.fk_to_ik'
+class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.fk_to_ik'
     bl_label = 'FK->IK'
     bl_description = ('在临时场景里拷贝骨架、删掉上半身子孙骨骼后把腿部 FK 转为 MMD IK，'
                       '再把 IK 关键帧写回原骨架')
@@ -628,15 +628,15 @@ _FINGER_BASE_NAMES = (
 )
 
 
-class RGBMOCAP_OT_bake_fingers(bpy.types.Operator):
-    bl_idname = 'rgbmocap.bake_fingers'
+class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.bake_fingers'
     bl_label = '烘焙手指动作'
     bl_description = ('进入临时场景，用原骨架烘焙手指骨骼的约束结果，'
                       '写入当前动作并清除手指上的约束')
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        props = getattr(context.scene, 'rgbmocap_properties', None)
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
         if (props is None or
                 (props.finger_limits_mode != 'ENABLED' and
                  props.finger_driver_mode != 'ENABLED')):
