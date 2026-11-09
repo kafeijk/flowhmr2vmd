@@ -66,36 +66,17 @@ def _update_limit(self, context):
 _ROTATE_TOE_BUSY = False
 
 
-def _report_error(context, message):
-    try:
-        window_manager = context.window_manager
-
-        def draw(menu, _message=message):
-            menu.layout.label(text=_message, icon='ERROR')
-
-        window_manager.popup_menu(draw, title='脚尖旋转', icon='ERROR')
-    except Exception:
-        print('脚尖旋转:', message)
-
-
 def _update_rotate_toe(self, context):
-    """开启：つま先 → 足先EX；关闭：足先EX → つま先。"""
+    """开启：つま先 → 足先EX；关闭：足先EX → つま先；失败静默跳过。"""
     global _ROTATE_TOE_BUSY
     if _ROTATE_TOE_BUSY:
         return
     armature = _active_armature(context) or _fallback_armature(context)
     if armature is None:
-        _report_error(context, '请先选中 MMD 模型')
         return
     _ROTATE_TOE_BUSY = True
     try:
-        ok, message = convert_toe_rotation(
-            armature, self.rotate_toe_mode == 'ENABLED')
-        if ok:
-            return
-        self.rotate_toe_mode = ('DISABLED' if self.rotate_toe_mode == 'ENABLED'
-                                else 'ENABLED')
-        _report_error(context, message)
+        convert_toe_rotation(armature, self.rotate_toe_mode == 'ENABLED')
     finally:
         _ROTATE_TOE_BUSY = False
 

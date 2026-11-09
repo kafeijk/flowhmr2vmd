@@ -40,7 +40,7 @@ def _reset_to_rest(root, armature):
 class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.retarget_smplh'
     bl_label = '执行 VMD 重定向'
-    bl_description = '读取 final.npz 标记的 toyxyz / RGB MoCap 工程缓存，直接写入选中 MMD 模型骨架的关键帧'
+    bl_description = '将FlowHMR生成的动作数据转换为VMD格式，并将关键帧注册到当前选中模型的骨骼上'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -185,19 +185,16 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             if props.finger_driver_mode == 'ENABLED':
                 finger_limits.apply_finger_drivers(armature, props, context.scene)
 
-        text = (f"重定向成功，共{result['frames']} 帧。")
+        text = (f"已完成重定向，共 {result['frames']} 帧。")
         if not has_upper1:
-            text += ' 缺少 上半身1：其旋转已并入 上半身2。'
+            text += ' 缺少「上半身1」，结果已并入「上半身2」。'
         if not has_toe:
-            text += ' 缺少 つま先（任一侧缺失按两侧处理）：两侧脚趾旋转已丢弃。'
+            text += ' 缺少「つま先」，脚尖旋转已丢弃。'
         self.report({'INFO'}, text)
         if score.get('pt_fallback'):
             self.report({'WARNING'},
                         '读取 corrected_initial.pt 失败，已用工程 rig 旋转代替 native 旋转：'
                         + str(score['pt_fallback'])[-200:])
-        if result['skipped_toe']:
-            self.report({'WARNING'},
-                        '足先EX 位于付与链下，脚趾未单独打键，会跟随脚踝刚性运动。')
         return {'FINISHED'}
 
 

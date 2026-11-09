@@ -464,8 +464,7 @@ class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
 class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.fk_to_ik'
     bl_label = 'FK->IK'
-    bl_description = ('在临时场景里拷贝骨架、删掉上半身子孙骨骼后把腿部 FK 转为 MMD IK，'
-                      '再把 IK 关键帧写回原骨架')
+    bl_description = '将腿部驱动方式由FK转换为IK，以便后续调整动作。'
     bl_options = {'REGISTER', 'UNDO'}
 
     def check_props(self, context):
@@ -589,9 +588,7 @@ class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
                 ik.mmd_ik_toggle = True
         set_bone_progress(False)
         tag_redraw(context)
-        self.report({'INFO'},
-                    f'已在临时场景完成 FK->IK（{state["start"]}..{state["end"]} 帧），'
-                    '并把 IK 关键帧写回原骨架。')
+        self.report({'INFO'}, f'已完成 FK->IK')
 
     def _cleanup(self, return_to_original=True):
         state = self._state
@@ -639,8 +636,7 @@ def _select_pose_bone(pose_bone, selected):
 class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.bake_fingers'
     bl_label = '烘焙手指动作'
-    bl_description = ('进入临时场景，用原骨架烘焙手指骨骼的约束结果，'
-                      '写入当前动作并清除手指上的约束')
+    bl_description = '将手指骨骼约束与驱动器的计算结果烘焙到当前动作中'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
