@@ -5,13 +5,8 @@
 ## 依赖
 
 - Blender 3.2 或更高版本。
-- **MMD Tools**：必须先启用。
-- **带 numpy + scipy 的 Python 3**：用于脚部接触解算。
-  - 插件会自动在 `PATH`、Blender 自带 Python 和输出目录的上级目录中查找 `python.exe`。
-  - 找不到时可设置环境变量 `FLOWHMR2VMD_SMPLH_MODEL` 指向 `model.npz`，或设置 `FLOWHMR2VMD_PYTHON` 指向 `python.exe`。
-  - 接触解算在独立进程中运行，不依赖 Blender 内置 Python 是否带 scipy。
-- FlowHMR 的 SMPL-H 模型 `model.npz`，放在输出目录的上级，例如：
-  `.../app/flowhmr/assets/body_models/smplh/neutral/model.npz`。
+- MMD Tools 插件。
+- 含 numpy + scipy + torch 的 Python 3 环境（通常位于动补软件文件夹中）。
 
 ## 安装
 
