@@ -1,4 +1,7 @@
 """Bone-level operators: standardize channels and FK to MMD IK conversion."""
+import functools
+import time
+
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
@@ -10,6 +13,22 @@ _BONE_PROGRESS = {
     'text': '',
 }
 
+
+
+def timeit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+
+        result = func(*args, **kwargs)
+
+        end = time.perf_counter()
+
+        print(f"{func.__name__} 执行耗时: {end - start:.6f} 秒")
+
+        return result
+
+    return wrapper
 
 def get_bone_progress():
     return _BONE_PROGRESS
@@ -237,26 +256,23 @@ def _write_curves(action, path, frames, columns, group='standardize'):
 
 
 def _move_standardize_channels(action, armature):
+    """把 全ての親 的位移搬到 センター，腰 旋转保留。"""
     master_path = f'pose.bones["{_MASTER_BONE}"].location'
     master_rotation_path = f'pose.bones["{_MASTER_BONE}"].rotation_quaternion'
-    waist_path = f'pose.bones["{_WAIST_BONE}"].rotation_quaternion'
     center_location_path = f'pose.bones["{_CENTER_BONE}"].location'
     center_rotation_path = f'pose.bones["{_CENTER_BONE}"].rotation_quaternion'
-    has_location = bool(_curves(action, master_path))
-    has_rotation = bool(_curves(action, waist_path))
-    if not has_location and not has_rotation:
+    if not _curves(action, master_path):
         return False
     ik_targets = []
-    if has_location:
-        for side in ('.L', '.R'):
-            name = f'足ＩＫ{side}'
-            bone = armature.data.bones.get(name)
-            if bone is None or bone.parent is None:
-                continue
-            if _curves(action, f'pose.bones["{name}"].location'):
-                ik_targets.append(name)
+    for side in ('.L', '.R'):
+        name = f'足ＩＫ{side}'
+        bone = armature.data.bones.get(name)
+        if bone is None or bone.parent is None:
+            continue
+        if _curves(action, f'pose.bones["{name}"].location'):
+            ik_targets.append(name)
     frames = set()
-    for path in (master_path, master_rotation_path, waist_path,
+    for path in (master_path, master_rotation_path,
                  center_location_path, center_rotation_path):
         frames |= _key_times(action, path)
     for name in ik_targets:
@@ -267,15 +283,12 @@ def _move_standardize_channels(action, armature):
     curves = _curve_map(action)
     rest_master = armature.data.bones[_MASTER_BONE].matrix_local.copy()
     rest_center = armature.data.bones[_CENTER_BONE].matrix_local.copy()
-    rest_waist = armature.data.bones[_WAIST_BONE].matrix_local.copy()
     center_locations = ([], [], [])
-    center_rotations = ([], [], [], [])
     ik_locations = {name: ([], [], []) for name in ik_targets}
     for frame in frames:
         master_location = Vector([_evaluate(curves, master_path, index, frame)
                                   for index in range(3)])
         master_rotation = _quaternion_at(curves, master_rotation_path, frame)
-        waist_rotation = _quaternion_at(curves, waist_path, frame)
         center_basis = (
             Matrix.Translation([_evaluate(curves, center_location_path, index, frame)
                                 for index in range(3)]) @
@@ -283,17 +296,12 @@ def _move_standardize_channels(action, armature):
         master_basis = (Matrix.Translation(master_location) @
                         master_rotation.to_matrix().to_4x4())
         master_after = master_rotation.to_matrix().to_4x4()
-        waist_pose = (rest_master @ master_basis @ rest_master.inverted() @
-                      rest_center @ center_basis @ rest_center.inverted() @
-                      rest_waist @ waist_rotation.to_matrix().to_4x4())
+        center_pose = (rest_master @ master_basis @ rest_master.inverted() @
+                       rest_center @ center_basis)
         target = (rest_master @ master_after @ rest_master.inverted() @ rest_center)
-        center_basis_new = (target.inverted() @ waist_pose @
-                            rest_waist.inverted() @ rest_center)
-        location, rotation, _ = center_basis_new.decompose()
+        location = (target.inverted() @ center_pose).translation
         for index in range(3):
             center_locations[index].append(location[index])
-        for index in range(4):
-            center_rotations[index].append(rotation[index])
         for name in ik_targets:
             bone = armature.data.bones[name]
             parent = bone.parent
@@ -318,14 +326,10 @@ def _move_standardize_channels(action, armature):
             new_basis = chain_after.inverted() @ ik_pose
             for index in range(3):
                 ik_locations[name][index].append(new_basis.translation[index])
-    if has_rotation:
-        _write_curves(action, center_rotation_path, frames, center_rotations)
     _write_curves(action, center_location_path, frames, center_locations)
     for name in ik_targets:
         _write_curves(action, f'pose.bones["{name}"].location', frames,
                       ik_locations[name])
-    for prop in ('rotation_quaternion', 'rotation_euler', 'rotation_axis_angle'):
-        _remove_curves(action, f'pose.bones["{_WAIST_BONE}"].{prop}')
     _remove_curves(action, master_path)
     return True
 
@@ -373,7 +377,7 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
 
 _TOE_BONES = ('つま先', '足先EX')
 
-
+@timeit
 def convert_toe_rotation(armature, enabled):
     """在 つま先 与 足先EX 之间搬运旋转；返回 (成功, 错误信息)。
 
@@ -395,14 +399,74 @@ def convert_toe_rotation(armature, enabled):
         _convert_bone_rotation(action, armature, source + side, target + side)
     return True, ''
 
-
+@timeit
 def standardize_channels(armature):
-    """把 腰 旋转与 全ての親 位移移到 センター（重定向后自动调用）。"""
+    """把 全ての親 位移搬到 センター，保留 腰 旋转，并补偿 腰キャンセル。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
     _move_standardize_channels(action, armature)
     _reset_transferred_pose(armature)
+    _compensate_waist_cancel(action, armature)
+    return True
+
+@timeit
+def _compensate_waist_cancel(action, armature):
+    """恢复 腰キャンセル 的追加変形，并把被取消的 腰 旋转补偿到 足。
+
+    MMD 的 腰キャンセル 会取消 腰 的局部旋转，但约束状态不会写进 VMD。
+    这里把被取消的旋转按静息关系共轭到 足，写回它的局部旋转，使导出后
+    开启追加変形时腿的朝向仍与烘焙结果一致。
+    """
+    pairs = []
+    for side in ('.L', '.R'):
+        cancel = armature.pose.bones.get('腰キャンセル' + side)
+        foot = armature.pose.bones.get('足' + side)
+        if cancel is None or foot is None or foot.parent is None:
+            continue
+        constraint = cancel.constraints.get('mmd_additional_rotation')
+        if constraint is None or constraint.type != 'TRANSFORM':
+            continue
+        influence = getattr(getattr(cancel, 'mmd_bone', None),
+                            'additional_transform_influence', -1.0)
+        if abs(influence + 1.0) > 1e-6:
+            # 只处理完整取反的追加変形，其余保持静音。
+            continue
+        pairs.append((constraint, foot))
+    if not pairs:
+        return False
+    if action.get('flowhmr2vmd_waist_cancel'):
+        # 这个动作已经补偿过，避免重复叠加。
+        for constraint, _ in pairs:
+            constraint.mute = False
+        return True
+    waist_path = f'pose.bones["{_WAIST_BONE}"].rotation_quaternion'
+    if not _curves(action, waist_path):
+        for constraint, _ in pairs:
+            constraint.mute = False
+        return True
+    frames = sorted({int(round(time)) for time in set().union(*(
+        _key_times(action, f'pose.bones["{foot.name}"].rotation_quaternion')
+        for _, foot in pairs))})
+    if not frames:
+        return False
+    curves = _curve_map(action)
+    rest_waist = armature.data.bones[_WAIST_BONE].matrix_local.to_quaternion()
+    for constraint, foot in pairs:
+        constraint.mute = False
+        foot_path = f'pose.bones["{foot.name}"].rotation_quaternion'
+        rest_foot = foot.bone.matrix_local.to_quaternion()
+        rest_leg = rest_waist.inverted() @ rest_foot
+        quaternions = []
+        for frame in frames:
+            q_waist = _quaternion_at(curves, waist_path, frame)
+            q_foot = _quaternion_at(curves, foot_path, frame)
+            quaternions.append(
+                (rest_leg.inverted() @ q_waist @ rest_leg @ q_foot).normalized())
+        _write_curves(action, foot_path, frames,
+                      [[q[i] for q in quaternions] for i in range(4)],
+                      group='waist_cancel')
+    action['flowhmr2vmd_waist_cancel'] = True
     return True
 
 
@@ -423,8 +487,8 @@ def _reset_transferred_pose(armature):
 class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.standardize'
     bl_label = '标准化'
-    bl_description = ('把 腰 的旋转关键帧移到 センター，把 全ての親 的位移移到 センター，'
-                      '并清除原通道')
+    bl_description = ('把 全ての親 的位移移到 センター，保留 腰 旋转，'
+                      '并把 腰キャンセル 取消的旋转补偿到 足')
     bl_options = {'REGISTER', 'UNDO'}
 
     def check_props(self, context):
@@ -454,10 +518,9 @@ class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
         if checked is None:
             return {'CANCELLED'}
         armature, action = checked
-        _move_standardize_channels(action, armature)
-        _reset_transferred_pose(armature)
+        standardize_channels(armature)
         context.view_layer.update()
-        self.report({'INFO'}, '已把 腰 旋转与 全ての親 位移移动到 センター。')
+        self.report({'INFO'}, '已把 全ての親 位移移动到 センター，并把 腰キャンセル 补偿到 足。')
         return {'FINISHED'}
 
 
@@ -818,3 +881,4 @@ class FLOWHMR2VMD_OT_finger_driver(bpy.types.Operator):
                 finger_limits.apply_finger_limits(armature, props)
             mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
         return {'FINISHED'}
+

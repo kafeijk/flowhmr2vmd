@@ -1,5 +1,7 @@
 """Operator orchestration: source -> external solver -> armature keyframes."""
+import functools
 import shutil
+import time
 import traceback
 import bpy
 import numpy as np
@@ -197,7 +199,7 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         finally:
             shutil.rmtree(temp, ignore_errors=True)
 
-        # 重定向后自动把 腰 旋转与 全ての親 位移并入 センター。
+        # 重定向后自动标准化：位移搬到 センター，保留 腰 旋转并补偿 腰キャンセル。
         standardize_channels(armature)
         model_state = mmd.read_state(root)
         if props is not None and model_state[mmd.STATE_ROTATE_TOE] and has_toe:
@@ -239,3 +241,5 @@ class FLOWHMR2VMD_OT_reset_finger_limits(bpy.types.Operator):
                 setattr(props, name, item.default)
         self.report({'INFO'}, '手指约束的角度范围已恢复为默认值。')
         return {'FINISHED'}
+
+
