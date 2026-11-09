@@ -147,31 +147,31 @@ def _update_enabled(self, context):
 class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
         name='动作目录',
-        description='包含 final.npz 与 toyxyz / RGB MoCap 工程缓存的 FlowHMR 输出目录',
+        description='FlowHMR输出的动作所在目录',
         subtype='DIR_PATH',
     )
     show_finger_limits: bpy.props.BoolProperty(
         name='展开手指骨骼设置',
-        description='展开后可在下方修改六组基础手指的 XYZ 最小/最大角度',
+        description='展开手指骨骼设置',
         default=False,
     )
     rotate_toe_mode: bpy.props.EnumProperty(
         name='脚尖旋转',
-        description='开启时把 つま先 旋转交给 足先EX，关闭时反向交回 つま先',
+        description='开启后可使脚尖旋转，请根据实际效果来决定是否开启',
         items=ROTATE_TOE_MODE_ITEMS,
         default='DISABLED',
         update=_update_rotate_toe,
     )
     finger_limits_mode: bpy.props.EnumProperty(
         name='手指约束',
-        description='启用时创建 限定旋转 约束，关闭时删除本插件添加的约束',
+        description='启用时，为手指骨骼添加「限定旋转」约束，以修正手指异常弯曲的问题，但可能导致手指之间出现穿模，需进一步调整。关闭时，移除本插件添加的「限定旋转」约束',
         items=FINGER_LIMITS_MODE_ITEMS,
         default='DISABLED',
         update=_update_enabled,
     )
     finger_driver_mode: bpy.props.EnumProperty(
         name='手指约束驱动器',
-        description='启用后限制中指与无名指第一节的 Z 旋转，避免交叉；关闭时删除驱动器',
+        description='启用时，为手指骨骼约束添加驱动器，以缓解手指尖穿模的问题，但效果有限，可能仍需手动调整。关闭时，移除本插件添加的驱动器',
         items=FINGER_DRIVER_MODE_ITEMS,
         default='DISABLED',
         update=_update_driver,

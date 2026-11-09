@@ -17,9 +17,9 @@ bl_info = {
     'name': 'FlowHMR2VMD',
     'author': '来杯咖啡再说',
     'version': (1, 0, 0),
-    'blender': (4, 2, 0),
+    'blender': (3, 2, 0),
     'location': 'View3D > Sidebar > FlowHMR2VMD',
-    'description': '读取 final.npz 或 RGB MoCap 工程缓存，把 SMPL-H 动作重定向到选中的 MMD 模型骨架并直接打关键帧',
+    'description': '将FlowHMR生成的动作数据转换为VMD格式，并将关键帧注册到当前选中模型的骨骼上',
     'category': 'Animation',
 }
 

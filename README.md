@@ -1,10 +1,10 @@
 # FlowHMR2VMD
 
-把 FlowHMR 的 `final.npz` 或 RGB MoCap 工程缓存重定向到 Blender 中选中的 MMD 模型，并**直接在骨架的关键帧上写入动作**。
+将FlowHMR生成的动作数据转换为VMD格式，并将关键帧注册到当前选中模型的骨骼上。
 
 ## 依赖
 
-- Blender 4.2 或更高版本。
+- Blender 3.2 或更高版本。
 - **MMD Tools**：必须先启用。
 - **带 numpy + scipy 的 Python 3**：用于脚部接触解算。
   - 插件会自动在 `PATH`、Blender 自带 Python 和输出目录的上级目录中查找 `python.exe`。

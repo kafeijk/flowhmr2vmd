@@ -208,4 +208,12 @@ def remove_finger_drivers(armature):
             for attribute in ('min_z', 'max_z'):
                 if constraint.driver_remove(attribute):
                     count += 1
+    # 约束已被删除时 driver_remove 找不到目标，清理指向约束属性的残留驱动曲线。
+    animation_data = armature.animation_data
+    if animation_data is not None:
+        path = f'constraints["{FINGER_CONSTRAINT_NAME}"].'
+        for fcurve in list(animation_data.drivers):
+            if path in fcurve.data_path:
+                animation_data.drivers.remove(fcurve)
+                count += 1
     return count

@@ -628,6 +628,14 @@ _FINGER_BASE_NAMES = (
 )
 
 
+def _select_pose_bone(pose_bone, selected):
+    """跨版本选择骨骼：3.6 用 Bone.select，5.0 起改为 PoseBone.select。"""
+    if hasattr(pose_bone, 'select'):
+        pose_bone.select = selected
+    else:
+        pose_bone.bone.select = selected
+
+
 class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.bake_fingers'
     bl_label = '烘焙手指动作'
@@ -676,10 +684,10 @@ class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
         armature.select_set(True)
         context.view_layer.objects.active = armature
         bpy.ops.object.mode_set(mode='POSE')
-        for bone in armature.data.bones:
-            bone.select = False
+        for pose_bone in armature.pose.bones:
+            _select_pose_bone(pose_bone, False)
         for pose_bone in fingers:
-            pose_bone.bone.select = True
+            _select_pose_bone(pose_bone, True)
         bpy.ops.nla.bake(
             frame_start=0, frame_end=frame_end, visual_keying=True,
             clear_constraints=True, clear_parents=True,
