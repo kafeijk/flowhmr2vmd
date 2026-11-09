@@ -71,8 +71,13 @@ def read_state(root):
 
 
 def write_state(root, key, value):
-    if root is not None:
-        root[key] = bool(value)
+    """开启时写入 True，关闭时移除该属性。"""
+    if root is None:
+        return
+    if value:
+        root[key] = True
+    elif key in root:
+        del root[key]
 
 
 def meshes_for(armature):
