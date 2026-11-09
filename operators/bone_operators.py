@@ -255,14 +255,105 @@ def _write_curves(action, path, frames, columns, group='standardize'):
         fcurve.update()
 
 
+def _world_rotation_at(curves, armature, names, frame):
+    """按静息关系与曲线求一条骨骼链末端的世界旋转。"""
+    rotation = None
+    previous = None
+    for name in names:
+        bone = armature.data.bones.get(name)
+        if bone is None:
+            return Quaternion()
+        rest = bone.matrix_local.to_quaternion()
+        if rotation is None:
+            rotation = rest
+        else:
+            rotation = rotation @ (previous.inverted() @ rest)
+        rotation = rotation @ _quaternion_at(
+            curves, f'pose.bones["{name}"].rotation_quaternion', frame)
+        previous = rest
+    return rotation if rotation is not None else Quaternion()
+
+
+def _distribute_waist_rotation(action, armature):
+    """把 腰 的旋转增量到 上半身/下半身，支点补偿写到 センター。"""
+    waist_path = f'pose.bones["{_WAIST_BONE}"].rotation_quaternion'
+    if not _curves(action, waist_path):
+        return False
+    rest_waist = armature.data.bones[_WAIST_BONE].matrix_local.copy()
+    rest_waist_q = rest_waist.to_quaternion()
+    curves = _curve_map(action)
+    waist_frames = _key_times(action, waist_path)
+    for target in ('下半身', '上半身'):
+        bone = armature.data.bones.get(target)
+        if bone is None or armature.pose.bones.get(target) is None:
+            continue
+        target_path = f'pose.bones["{target}"].rotation_quaternion'
+        frames = sorted(waist_frames | _key_times(action, target_path))
+        rest_target_q = bone.matrix_local.to_quaternion()
+        quaternions = []
+        for frame in frames:
+            q_waist = _quaternion_at(curves, waist_path, frame)
+            q_target = _quaternion_at(curves, target_path, frame)
+            delta = (rest_target_q.inverted() @ rest_waist_q @ q_waist @
+                     rest_waist_q.inverted() @ rest_target_q)
+            quaternions.append((delta @ q_target).normalized())
+        _write_curves(action, target_path, frames,
+                      [[q[i] for q in quaternions] for i in range(4)])
+
+    # 旋转支点从 腰 头移到 下半身 头，整段身体会平移同一个世界位移；
+    # 下半身/上半身 不接收位置通道，把反向位移写进 センター。
+    lower = armature.data.bones.get('下半身')
+    center = armature.data.bones.get(_CENTER_BONE)
+    master = armature.data.bones.get(_MASTER_BONE)
+    if lower is not None and center is not None and master is not None:
+        waist_bone = armature.data.bones[_WAIST_BONE]
+        ancestors = []
+        parent = waist_bone.parent
+        while parent is not None:
+            ancestors.append(parent.name)
+            parent = parent.parent
+        ancestors.reverse()
+        rel_lower = waist_bone.matrix_local.inverted() @ lower.matrix_local
+        lower_offset = rel_lower.translation.copy()
+        rest_master = master.matrix_local.to_quaternion()
+        rest_center = center.matrix_local.to_quaternion()
+        center_path = f'pose.bones["{_CENTER_BONE}"].location'
+        center_frames = sorted(waist_frames | _key_times(action, center_path))
+        center_locations = ([], [], [])
+        for frame in center_frames:
+            q_waist = _quaternion_at(curves, waist_path, frame)
+            if ancestors:
+                base = _world_rotation_at(curves, armature, ancestors, frame)
+                base = base @ (armature.data.bones[ancestors[-1]].matrix_local
+                               .to_quaternion().inverted() @ rest_waist_q)
+            else:
+                base = rest_waist_q.copy()
+            shift = base.to_matrix() @ (
+                (q_waist.to_matrix() - Matrix.Identity(3)) @ lower_offset)
+            master_rotation = _world_rotation_at(
+                curves, armature, (_MASTER_BONE,), frame)
+            mapping = master_rotation @ (rest_master.inverted() @ rest_center)
+            correction = mapping.inverted() @ shift
+            for index in range(3):
+                center_locations[index].append(
+                    _evaluate(curves, center_path, index, frame) +
+                    correction[index])
+        _write_curves(action, center_path, center_frames, center_locations)
+
+    for prop in ('rotation_quaternion', 'rotation_euler', 'rotation_axis_angle'):
+        _remove_curves(action, f'pose.bones["{_WAIST_BONE}"].{prop}')
+    return True
+
+
 def _move_standardize_channels(action, armature):
-    """把 全ての親 的位移搬到 センター，腰 旋转保留。"""
+    """把 腰 旋转增量到 上半身/下半身，把 全ての親 位移搬到 センター。"""
+    moved = _distribute_waist_rotation(action, armature)
     master_path = f'pose.bones["{_MASTER_BONE}"].location'
     master_rotation_path = f'pose.bones["{_MASTER_BONE}"].rotation_quaternion'
     center_location_path = f'pose.bones["{_CENTER_BONE}"].location'
     center_rotation_path = f'pose.bones["{_CENTER_BONE}"].rotation_quaternion'
     if not _curves(action, master_path):
-        return False
+        return moved
     ik_targets = []
     for side in ('.L', '.R'):
         name = f'足ＩＫ{side}'
@@ -401,7 +492,7 @@ def convert_toe_rotation(armature, enabled):
 
 @timeit
 def standardize_channels(armature):
-    """把 全ての親 位移搬到 センター，保留 腰 旋转，并补偿 腰キャンセル。"""
+    """把 腰 旋转增量到 上半身/下半身，位移搬到 センター，并开启 腰キャンセル。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
@@ -487,8 +578,8 @@ def _reset_transferred_pose(armature):
 class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.standardize'
     bl_label = '标准化'
-    bl_description = ('把 全ての親 的位移移到 センター，保留 腰 旋转，'
-                      '并把 腰キャンセル 取消的旋转补偿到 足')
+    bl_description = ('把 腰 旋转增量到 上半身/下半身，把 全ての親 位移移到 センター，'
+                      '并开启 腰キャンセル')
     bl_options = {'REGISTER', 'UNDO'}
 
     def check_props(self, context):
@@ -520,7 +611,7 @@ class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
         armature, action = checked
         standardize_channels(armature)
         context.view_layer.update()
-        self.report({'INFO'}, '已把 全ての親 位移移动到 センター，并把 腰キャンセル 补偿到 足。')
+        self.report({'INFO'}, '已把 腰 旋转增量到 上半身/下半身，位移移到 センター，并开启 腰キャンセル。')
         return {'FINISHED'}
 
 

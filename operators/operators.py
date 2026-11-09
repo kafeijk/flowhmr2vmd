@@ -199,7 +199,7 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         finally:
             shutil.rmtree(temp, ignore_errors=True)
 
-        # 重定向后自动标准化：位移搬到 センター，保留 腰 旋转并补偿 腰キャンセル。
+        # 重定向后自动标准化：腰 旋转增量到 上半身/下半身，位移搬到 センター。
         standardize_channels(armature)
         model_state = mmd.read_state(root)
         if props is not None and model_state[mmd.STATE_ROTATE_TOE] and has_toe:
