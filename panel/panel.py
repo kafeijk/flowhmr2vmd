@@ -1,11 +1,23 @@
 """Sidebar panel for the SMPL-H retarget add-on."""
 import bpy
 
+from ..core import mmd
 from ..core.finger_limits import FINGER_GROUPS
 from ..operators.bone_operators import get_bone_progress
 
 
-def _toggle_row(layout, props, label, op_idname, prop_name):
+def _model_state(context):
+    """当前选中 MMD 模型根对象上记录的开关状态，未选中时全部关闭。"""
+    selected = list(context.selected_objects)
+    obj = context.active_object if context.active_object in selected else (
+        selected[0] if selected else None)
+    if obj is None:
+        return mmd.read_state(None)
+    root, armature = mmd.find_root_and_armature(obj)
+    return mmd.read_state(root if armature is not None else None)
+
+
+def _toggle_row(layout, label, op_idname, enabled):
     """左侧固定宽度标签，右侧两个等宽按钮，保证多行对齐。"""
     row = layout.row(align=True)
     split = row.split(factor=0.4, align=True)
@@ -14,9 +26,9 @@ def _toggle_row(layout, props, label, op_idname, prop_name):
     buttons = split.row(align=True)
     halves = buttons.split(factor=0.5, align=True)
     halves.operator(op_idname, text='开启',
-                    depress=getattr(props, prop_name) == 'ENABLED').mode = 'ENABLED'
+                    depress=enabled).mode = 'ENABLED'
     halves.operator(op_idname, text='关闭',
-                    depress=getattr(props, prop_name) == 'DISABLED').mode = 'DISABLED'
+                    depress=not enabled).mode = 'DISABLED'
     return row
 
 
@@ -55,10 +67,11 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
         layout.use_property_decorate = False
         scene = context.scene
         props = scene.flowhmr2vmd_properties
+        state = _model_state(context)
         col = layout.column()
         col.operator('flowhmr2vmd.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
-        _toggle_row(col, props, '脚尖旋转', 'flowhmr2vmd.rotate_toe',
-                    'rotate_toe_mode')
+        _toggle_row(col, '脚尖旋转', 'flowhmr2vmd.rotate_toe',
+                    state[mmd.STATE_ROTATE_TOE])
         progress = get_bone_progress()
         if progress['active']:
             if hasattr(col, 'progress'):
@@ -78,11 +91,12 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
             inner = box.column()
             inner.use_property_decorate = False
 
-            _toggle_row(inner, props, '手指约束', 'flowhmr2vmd.finger_limits',
-                        'finger_limits_mode')
-            row = _toggle_row(inner, props, '手指约束驱动器',
-                              'flowhmr2vmd.finger_driver', 'finger_driver_mode')
-            row.enabled = props.finger_limits_mode == 'ENABLED'
+            _toggle_row(inner, '手指约束', 'flowhmr2vmd.finger_limits',
+                        state[mmd.STATE_FINGER_LIMITS])
+            row = _toggle_row(inner, '手指约束驱动器',
+                              'flowhmr2vmd.finger_driver',
+                              state[mmd.STATE_FINGER_DRIVER])
+            row.enabled = state[mmd.STATE_FINGER_LIMITS]
             row = inner.row(align=True)
             row.operator('flowhmr2vmd.bake_fingers', text='烘焙手指动作',
                          icon='ACTION')

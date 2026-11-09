@@ -176,13 +176,13 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
 
         # 重定向后自动把 腰 旋转与 全ての親 位移并入 センター。
         standardize_channels(armature)
-        if (props is not None and props.rotate_toe_mode == 'ENABLED' and
-                has_toe):
+        model_state = mmd.read_state(root)
+        if props is not None and model_state[mmd.STATE_ROTATE_TOE] and has_toe:
             convert_toe_rotation(armature, True)
 
-        if props is not None and props.finger_limits_mode == 'ENABLED':
+        if props is not None and model_state[mmd.STATE_FINGER_LIMITS]:
             finger_limits.apply_finger_limits(armature, props)
-            if props.finger_driver_mode == 'ENABLED':
+            if model_state[mmd.STATE_FINGER_DRIVER]:
                 finger_limits.apply_finger_drivers(armature, props, context.scene)
 
         text = (f"已完成重定向，共 {result['frames']} 帧。")

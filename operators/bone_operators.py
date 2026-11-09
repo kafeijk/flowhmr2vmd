@@ -640,12 +640,6 @@ class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if (props is None or
-                (props.finger_limits_mode != 'ENABLED' and
-                 props.finger_driver_mode != 'ENABLED')):
-            self.report({'ERROR'}, '请开启手指约束')
-            return {'CANCELLED'}
         if not mmd.mmd_tools_enabled():
             self.report({'ERROR'}, '请先启用 MMD Tools 插件。')
             return {'CANCELLED'}
@@ -653,11 +647,16 @@ class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
         obj = context.active_object if context.active_object in selected else (
             selected[0] if selected else None)
         if obj is None:
-            self.report({'ERROR'}, '请先选中 MMD 模型对象。')
+            self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
         root, armature = mmd.find_root_and_armature(obj)
         if armature is None:
-            self.report({'ERROR'}, '未找到 MMD 骨架。')
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        state = mmd.read_state(root)
+        if (not state[mmd.STATE_FINGER_LIMITS] and
+                not state[mmd.STATE_FINGER_DRIVER]):
+            self.report({'ERROR'}, '请开启手指约束')
             return {'CANCELLED'}
         fingers = [armature.pose.bones[f'{base}{side}']
                    for side in ('.L', '.R') for base in _FINGER_BASE_NAMES
@@ -695,9 +694,9 @@ class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
         if window is not None:
             window.scene = original_scene
         bpy.data.scenes.remove(tmp_scene)
-        # 烘焙后约束已被清除，面板开关同步关闭。
-        props.finger_limits_mode = 'DISABLED'
-        props.finger_driver_mode = 'DISABLED'
+        # 烘焙后约束已被清除，根对象上的开关同步关闭。
+        mmd.write_state(root, mmd.STATE_FINGER_LIMITS, False)
+        mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
         self.report({'INFO'},
                     f'已烘焙 {len(fingers)} 根手指骨骼（0..{frame_end} 帧）。')
         return {'FINISHED'}
@@ -709,14 +708,16 @@ _MODE_ITEMS = (
 )
 
 
-def _selected_armature(context):
+def _selected_model(context):
     selected = list(context.selected_objects)
     obj = context.active_object if context.active_object in selected else (
         selected[0] if selected else None)
     if obj is None:
-        return None
+        return None, None
     root, armature = mmd.find_root_and_armature(obj)
-    return armature if root is not None else None
+    if root is None or armature is None:
+        return None, None
+    return root, armature
 
 
 class FLOWHMR2VMD_OT_rotate_toe(bpy.types.Operator):
@@ -729,17 +730,19 @@ class FLOWHMR2VMD_OT_rotate_toe(bpy.types.Operator):
                                  default='ENABLED')
 
     def execute(self, context):
-        armature = _selected_armature(context)
+        if not mmd.mmd_tools_enabled():
+            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
+            return {'CANCELLED'}
+        root, armature = _selected_model(context)
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
-        ok, message = convert_toe_rotation(armature, self.mode == 'ENABLED')
+        enabled = self.mode == 'ENABLED'
+        ok, message = convert_toe_rotation(armature, enabled)
         if not ok:
             self.report({'ERROR'}, message)
             return {'CANCELLED'}
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is not None:
-            props.rotate_toe_mode = self.mode
+        mmd.write_state(root, mmd.STATE_ROTATE_TOE, enabled)
         return {'FINISHED'}
 
 
@@ -753,7 +756,10 @@ class FLOWHMR2VMD_OT_finger_limits(bpy.types.Operator):
                                  default='ENABLED')
 
     def execute(self, context):
-        armature = _selected_armature(context)
+        if not mmd.mmd_tools_enabled():
+            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
+            return {'CANCELLED'}
+        root, armature = _selected_model(context)
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
@@ -769,12 +775,12 @@ class FLOWHMR2VMD_OT_finger_limits(bpy.types.Operator):
                 self.report({'ERROR'}, '骨架缺少手指骨骼：' + '、'.join(missing))
                 return {'CANCELLED'}
             finger_limits.apply_finger_limits(armature, props)
-            props.finger_limits_mode = 'ENABLED'
+            mmd.write_state(root, mmd.STATE_FINGER_LIMITS, True)
         else:
             finger_limits.remove_finger_drivers(armature)
             finger_limits.remove_finger_limits(armature)
-            props.finger_driver_mode = 'DISABLED'
-            props.finger_limits_mode = 'DISABLED'
+            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
+            mmd.write_state(root, mmd.STATE_FINGER_LIMITS, False)
         return {'FINISHED'}
 
 
@@ -788,22 +794,27 @@ class FLOWHMR2VMD_OT_finger_driver(bpy.types.Operator):
                                  default='ENABLED')
 
     def execute(self, context):
-        armature = _selected_armature(context)
+        if not mmd.mmd_tools_enabled():
+            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
+            return {'CANCELLED'}
+        root, armature = _selected_model(context)
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
         props = getattr(context.scene, 'flowhmr2vmd_properties', None)
         if props is None:
             return {'CANCELLED'}
+        state = mmd.read_state(root)
         if self.mode == 'ENABLED':
-            if props.finger_limits_mode != 'ENABLED':
+            if not state[mmd.STATE_FINGER_LIMITS]:
                 self.report({'ERROR'}, '请先开启手指约束')
                 return {'CANCELLED'}
             finger_limits.apply_finger_limits(armature, props)
             finger_limits.apply_finger_drivers(armature, props, context.scene)
-            props.finger_driver_mode = 'ENABLED'
+            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, True)
         else:
             finger_limits.remove_finger_drivers(armature)
-            finger_limits.apply_finger_limits(armature, props)
-            props.finger_driver_mode = 'DISABLED'
+            if state[mmd.STATE_FINGER_LIMITS]:
+                finger_limits.apply_finger_limits(armature, props)
+            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
         return {'FINISHED'}

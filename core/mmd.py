@@ -56,6 +56,25 @@ def find_root_and_armature(obj):
     return root, find_armature(root)
 
 
+STATE_ROTATE_TOE = 'flowhmr2vmd_rotate_toe'
+STATE_FINGER_LIMITS = 'flowhmr2vmd_finger_limits'
+STATE_FINGER_DRIVER = 'flowhmr2vmd_finger_driver'
+
+
+def read_state(root):
+    """根对象上记录的开关状态；没有对应属性时默认关闭。"""
+    if root is None:
+        return {key: False for key in
+                (STATE_ROTATE_TOE, STATE_FINGER_LIMITS, STATE_FINGER_DRIVER)}
+    return {key: bool(root.get(key, False)) for key in
+            (STATE_ROTATE_TOE, STATE_FINGER_LIMITS, STATE_FINGER_DRIVER)}
+
+
+def write_state(root, key, value):
+    if root is not None:
+        root[key] = bool(value)
+
+
 def meshes_for(armature):
     meshes = []
     for obj in bpy.data.objects:
