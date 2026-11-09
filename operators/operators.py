@@ -200,8 +200,8 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
 
 class FLOWHMR2VMD_OT_reset_finger_limits(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.reset_finger_limits'
-    bl_label = '恢复默认手指约束'
-    bl_description = '把所有手指角度范围恢复为默认值'
+    bl_label = '将手指约束的角度范围恢复为默认值'
+    bl_description = '将手指约束的角度范围恢复为默认值'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
