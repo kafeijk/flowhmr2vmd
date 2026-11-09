@@ -722,7 +722,7 @@ def _selected_armature(context):
 class FLOWHMR2VMD_OT_rotate_toe(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.rotate_toe'
     bl_label = '脚尖旋转'
-    bl_description = '开启时把 つま先 旋转交给 足先EX，关闭时反向交回 つま先'
+    bl_description = '开启后可使脚尖旋转，请根据实际效果来决定是否开启'
     bl_options = {'UNDO'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
