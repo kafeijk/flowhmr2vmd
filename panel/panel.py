@@ -10,7 +10,7 @@ class RGBMOCAP_PT_panel(bpy.types.Panel):
     bl_idname = 'RGBMOCAP_PT_retarget'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'VMD Retarget'
+    bl_category = 'FlowHMR2VMD'
     bl_order = 0
 
     def draw(self, context):
@@ -31,7 +31,7 @@ class RGBMOCAP_PT_tools(bpy.types.Panel):
     bl_idname = 'RGBMOCAP_PT_tools'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'VMD Retarget'
+    bl_category = 'FlowHMR2VMD'
     bl_order = 1
 
     def draw(self, context):

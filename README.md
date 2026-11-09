@@ -1,4 +1,4 @@
-# VMD Retarget
+# FlowHMR2VMD
 
 把 FlowHMR 的 `final.npz` 或 RGB MoCap 工程缓存重定向到 Blender 中选中的 MMD 模型，并**直接在骨架的关键帧上写入动作**。
 
@@ -27,7 +27,7 @@
 ## 代码结构
 
 ```text
-vmd_retarget/
+flowhmr2vmd/
 ├─ __init__.py           auto_load 注册入口
 ├─ config.py            脚手架标识
 ├─ operators/           operators.py：总调度
@@ -75,7 +75,7 @@ XYZ 最小/最大角度（默认值对应左手指）：
 ## 使用
 
 1. 在 3D 视图中**选中 MMD 模型的任意对象**（网格或骨架均可）。
-2. 打开 **View3D > Sidebar > VMD Retarget > VMD 动作重定向**。
+2. 打开 **View3D > Sidebar > FlowHMR2VMD > VMD 动作重定向**。
 3. 选择包含 `final.npz` 的文件夹，或 RGB MoCap 工程的 `flowhmr` 目录；
    插件会自动向下查找。
 4. 选择名称对照：
