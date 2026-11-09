@@ -187,6 +187,45 @@ def _enable_leg_ik_toggle(armature, frame):
             pose_bone.keyframe_insert('mmd_ik_toggle', frame=frame)
 
 
+def _bake_leg_fk_from_ik(armature, start, end):
+    """把 IK 解算后的腿部姿态写回 FK 旋转曲线。
+
+    这样关闭 IK 后，腿部 FK 与开启 IK 时的姿态一致；开启 IK 时仍由
+    足ＩＫ / つま先ＩＫ 驱动，不受影响。
+    """
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return
+    scene = bpy.context.scene
+    names = [f'{name}{side}' for side in ('.L', '.R')
+             for name in ('足', 'ひざ', '足首', 'つま先', '足先EX')]
+    names = [name for name in names
+             if armature.pose.bones.get(name) is not None]
+    frames = list(range(int(start), int(end) + 1))
+    values = {name: [] for name in names}
+    for frame in frames:
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        for name in names:
+            pose_bone = armature.pose.bones[name]
+            parent = pose_bone.parent
+            if parent is None:
+                basis = pose_bone.bone.matrix_local.inverted() @ pose_bone.matrix
+            else:
+                rest = (parent.bone.matrix_local.inverted() @
+                        pose_bone.bone.matrix_local)
+                basis = (parent.matrix @ rest).inverted() @ pose_bone.matrix
+            values[name].append(basis.to_quaternion().normalized())
+    for name, quaternions in values.items():
+        if not quaternions:
+            continue
+        _write_curves(action, f'pose.bones["{name}"].rotation_quaternion',
+                      frames,
+                      [[q[i] for q in quaternions] for i in range(4)],
+                      group='fk_ik')
+    scene.frame_set(int(start))
+
+
 def _remove_leg_fcurves(armature):
     """清理腿部 FK 通道。
 
@@ -751,6 +790,7 @@ class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
         _remove_leg_fcurves(state['armature'])
         _enable_leg_ik_toggle(state['armature'], state['start'])
         _set_leg_ik(state['armature'], True)
+        _bake_leg_fk_from_ik(state['armature'], state['start'], state['end'])
         set_bone_progress(False)
         tag_redraw(context)
         self.report({'INFO'}, f'已完成 FK->IK')
