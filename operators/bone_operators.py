@@ -135,7 +135,6 @@ def _convert_frame(armature, scene, frame, records):
         records[side].append((frame,
                               ik.location.copy(),
                               ik.rotation_quaternion.copy(),
-                              bool(ik.mmd_ik_toggle),
                               toe.location.copy()))
     bpy.context.view_layer.update()
 
@@ -152,9 +151,7 @@ def _write_back_leg_ik(armature, records):
             (f'pose.bones["足ＩＫ{side}"].location', 3, lambda row: row[1]),
             (f'pose.bones["足ＩＫ{side}"].rotation_quaternion', 4,
              lambda row: row[2]),
-            (f'pose.bones["足ＩＫ{side}"].mmd_ik_toggle', 1,
-             lambda row: (row[3],)),
-            (f'pose.bones["つま先ＩＫ{side}"].location', 3, lambda row: row[4]),
+            (f'pose.bones["つま先ＩＫ{side}"].location', 3, lambda row: row[3]),
         )
         for path, count, getter in specs:
             for fcurve in [fc for fc in action.fcurves
@@ -171,6 +168,23 @@ def _write_back_leg_ik(armature, records):
                     point.co = (frames[i], float(value[index]))
                     point.interpolation = 'BEZIER'
                 fcurve.update()
+
+
+def _enable_leg_ik_toggle(armature, frame):
+    """清空 足ＩＫ / つま先ＩＫ 的 IK 开关通道，并在第一帧写入开启。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return
+    for side in ('.L', '.R'):
+        for base in ('足ＩＫ', 'つま先ＩＫ'):
+            pose_bone = armature.pose.bones.get(base + side)
+            if pose_bone is None or not hasattr(pose_bone, 'mmd_ik_toggle'):
+                continue
+            path = pose_bone.path_from_id('mmd_ik_toggle')
+            for fcurve in [fc for fc in action.fcurves if fc.data_path == path]:
+                action.fcurves.remove(fcurve)
+            pose_bone.mmd_ik_toggle = True
+            pose_bone.keyframe_insert('mmd_ik_toggle', frame=frame)
 
 
 def _remove_leg_fcurves(armature):
@@ -735,11 +749,8 @@ class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
         self._cleanup(return_to_original=True)
         _write_back_leg_ik(state['armature'], state['records'])
         _remove_leg_fcurves(state['armature'])
+        _enable_leg_ik_toggle(state['armature'], state['start'])
         _set_leg_ik(state['armature'], True)
-        for side in ('.L', '.R'):
-            ik = state['armature'].pose.bones.get(f'足ＩＫ{side}')
-            if ik is not None:
-                ik.mmd_ik_toggle = True
         set_bone_progress(False)
         tag_redraw(context)
         self.report({'INFO'}, f'已完成 FK->IK')
