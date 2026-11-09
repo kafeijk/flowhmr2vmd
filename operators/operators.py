@@ -9,6 +9,25 @@ from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 from .bone_operators import convert_toe_rotation, standardize_channels
 
 
+def _middle_spine_name(bones):
+    """上半身 与 上半身2 之间唯一的中间骨（上半身1 / 上半身3 等）。
+
+    两者之间没有骨骼或不止一个时返回 None。
+    """
+    lower = bones.get('上半身')
+    upper = bones.get('上半身2')
+    if lower is None or upper is None:
+        return None
+    chain = []
+    parent = upper.parent
+    while parent is not None and parent.name != lower.name:
+        chain.append(parent.name)
+        parent = parent.parent
+    if parent is None or len(chain) != 1:
+        return None
+    return chain[0]
+
+
 def _reset_to_rest(root, armature):
     """把角色恢复到静置状态，保证每次重定向从同一基准开始。
 
@@ -106,7 +125,8 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
     def _run(self, context, path, project, source, root, armature, props):
         mapping = list(NATIVE_MAPPING)
         bones = armature.data.bones
-        has_upper1 = bones.get('上半身1') is not None
+        middle_spine = _middle_spine_name(bones)
+        has_upper1 = middle_spine is not None
         # 任一侧缺少 つま先 就按两侧都没有处理，只留一半没有意义。
         has_toe = all(bones.get(f'つま先{side}') is not None
                       for side in ('.L', '.R'))
@@ -124,8 +144,11 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             self.report({'ERROR'}, '骨架下没有蒙皮网格，无法计算脚底接触。')
             return {'CANCELLED'}
         skip_indices = []
-        if not has_upper1:
-            # 上半身1 缺失：丢弃该槽位，Spine1 的旋转已包含在 上半身2
+        if has_upper1:
+            # 中间骨按层级确定，可能是 上半身1、上半身3 等。
+            mapping[6] = middle_spine
+        else:
+            # 中间骨不存在：丢弃该槽位，Spine1 的旋转已包含在 上半身2
             # 的绝对世界旋转里，效果等同并入 上半身2。
             mapping[6] = '上半身2'
             skip_indices.append(6)
@@ -187,7 +210,7 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
 
         text = (f"已完成重定向，共 {result['frames']} 帧。")
         if not has_upper1:
-            text += ' 缺少「上半身1」，结果已并入「上半身2」。'
+            text += ' 缺少脊柱中间骨，结果已并入「上半身2」。'
         if not has_toe:
             text += ' 缺少「つま先」，脚尖旋转已丢弃。'
         self.report({'INFO'}, text)
