@@ -14,7 +14,34 @@ class SolverError(Exception):
     pass
 
 
+def _env_pythons(folder, max_depth=3):
+    """环境地址及其子目录中的 Python 解释器（覆盖 envs/、venv 等常见布局）。"""
+    base = Path(folder)
+    if not base.is_dir():
+        return
+    names = ('python.exe', 'python', 'python3', 'python3.exe')
+    for root, dirs, files in os.walk(base):
+        depth = len(Path(root).relative_to(base).parts)
+        if depth >= max_depth:
+            dirs[:] = []
+        for name in names:
+            if name in files:
+                yield Path(root) / name
+                break
+
+
+def _preference_env():
+    try:
+        from ..properties.preferences import get_env_path
+        return get_env_path()
+    except Exception:
+        return ''
+
+
 def _python_candidates(folder):
+    preference = _preference_env()
+    if preference:
+        yield from _env_pythons(preference)
     env = os.environ.get('RGBMOCAP_PYTHON')
     if env:
         yield Path(env)
@@ -43,18 +70,24 @@ def _python_candidates(folder):
             break
 
 
-def _works(path):
+def _probe(path):
+    """(可用, 带 torch)；不可用时返回 None。"""
     try:
         result = subprocess.run(
-            [str(path), '-c', 'import numpy, scipy; print(1)'],
+            [str(path), '-c',
+             'import importlib.util as u; import numpy, scipy; '
+             'print(1 if u.find_spec("torch") else 0)'],
             capture_output=True, text=True, timeout=25,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        return result.returncode == 0 and '1' in result.stdout
+        if result.returncode != 0:
+            return None
+        return True, '1' in result.stdout
     except Exception:
-        return False
+        return None
 
 
 def find_python(folder):
+    fallback = None
     seen = set()
     for path in _python_candidates(folder):
         key = str(path).lower()
@@ -66,9 +99,16 @@ def find_python(folder):
         if path == Path(sys.executable) and path.name.lower() not in (
                 'python.exe', 'python', 'python3'):
             continue
-        if path.is_file() and _works(path):
+        if not path.is_file():
+            continue
+        probe = _probe(path)
+        if probe is None:
+            continue
+        if probe[1]:
             return path
-    return None
+        if fallback is None:
+            fallback = path
+    return fallback
 
 
 def run_solver(request, output, folder):
