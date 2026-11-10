@@ -8,8 +8,9 @@ import numpy as np
 
 from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
-from .bone_operators import (convert_toe_rotation, restore_toe_from_custom,
-                             standardize_channels, store_toe_to_custom)
+from .bone_operators import (clear_toe_bone_curves, convert_toe_rotation,
+                             restore_toe_from_custom, standardize_channels,
+                             store_toe_to_custom)
 
 
 def _middle_spine_name(bones):
@@ -214,6 +215,9 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
                 restore_toe_from_custom(armature)
         elif has_toe and toe_enabled:
             convert_toe_rotation(armature, True)
+        elif has_toe:
+            # 关闭脚尖旋转：清掉 FK→IK 阶段写出的 足先EX 姿态并归位。
+            clear_toe_bone_curves(armature)
 
         if props is not None and model_state[mmd.STATE_FINGER_LIMITS]:
             finger_limits.apply_finger_limits(armature, props)

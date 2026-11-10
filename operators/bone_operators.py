@@ -531,8 +531,21 @@ def _has_toe_custom(action, side):
                for component in _TOE_CUSTOM_PROPS)
 
 
+def _reset_bone_rotation(armature, bone_name):
+    """把骨骼的当前姿态旋转归位到静置值。"""
+    pose_bone = armature.pose.bones.get(bone_name)
+    if pose_bone is None:
+        return
+    if pose_bone.rotation_mode == 'QUATERNION':
+        pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
+        pose_bone.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+    else:
+        pose_bone.rotation_euler = (0.0, 0.0, 0.0)
+
+
 def clear_toe_bone_curves(armature, side=None):
-    """清空 足先EX 的骨骼关键帧，保留自定义属性通道。"""
+    """清空 足先EX 的骨骼关键帧并把骨骼姿态归位，保留自定义属性通道。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
@@ -544,6 +557,8 @@ def clear_toe_bone_curves(armature, side=None):
                        if fc.data_path.startswith(prefix + '.')]:
             action.fcurves.remove(fcurve)
             cleared = True
+        # 删除曲线不会改变当前姿态值，必须显式归位。
+        _reset_bone_rotation(armature, _TOE_BONES[1] + value)
     return cleared
 
 
@@ -655,6 +670,9 @@ def convert_toe_rotation(armature, enabled):
         for side in ('.L', '.R'):
             _convert_bone_rotation(action, armature, source + side,
                                    target + side)
+            if not enabled:
+                # 关闭时 足先EX 不再承载旋转，姿态也要归位。
+                _reset_bone_rotation(armature, source + side)
         return True, ''
     if enabled:
         restore_toe_from_custom(armature)
