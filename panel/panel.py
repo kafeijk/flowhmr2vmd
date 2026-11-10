@@ -65,3 +65,5 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
                     props.toe_rotation == 'ENABLED')
         _toggle_row(col, '手指修复', 'flowhmr2vmd.set_finger_fix',
                     props.finger_fix == 'ENABLED')
+        col.operator('flowhmr2vmd.clean_ik_keys', text='清理 IK 关键帧',
+                     icon='ACTION')

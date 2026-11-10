@@ -1088,6 +1088,121 @@ def revert_finger_fix(armature):
     return restored
 
 
+_IK_TARGET_BONES = ('足ＩＫ', 'つま先ＩＫ')
+_IK_POSITION_TOLERANCE = 0.005
+_IK_ROTATION_TOLERANCE = math.radians(0.5)
+_MMD_HANDLE_START = 20.0 / 127.0
+_MMD_HANDLE_END = 107.0 / 127.0
+
+
+def _simplify_indices(points, frames, tolerance):
+    """按时间线性插值后的位置偏差对关键帧做 RDP 简化。"""
+    if len(points) < 3:
+        return list(range(len(points)))
+    keep = {0, len(points) - 1}
+    stack = [(0, len(points) - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end <= start + 1:
+            continue
+        span = frames[end] - frames[start]
+        worst = 0.0
+        worst_index = -1
+        for index in range(start + 1, end):
+            ratio = (frames[index] - frames[start]) / span if span else 0.5
+            expected = points[start].lerp(points[end], ratio)
+            deviation = (points[index] - expected).length
+            if deviation > worst:
+                worst = deviation
+                worst_index = index
+        if worst > tolerance:
+            keep.add(worst_index)
+            stack.append((start, worst_index))
+            stack.append((worst_index, end))
+    return sorted(keep)
+
+
+def _write_bezier_curves(action, path, frames, columns, group='ik_clean'):
+    """写入贝塞尔曲线：控制点落在弦上（MMD 的 20/127、107/127），不会过冲。"""
+    _remove_curves(action, path)
+    for index, values in enumerate(columns):
+        fcurve = action.fcurves.new(path, index=index, action_group=group)
+        points = fcurve.keyframe_points
+        points.add(len(frames))
+        for i, (frame, value) in enumerate(zip(frames, values)):
+            point = points[i]
+            point.co = (float(frame), float(value))
+            point.interpolation = 'BEZIER'
+            point.handle_left_type = 'FREE'
+            point.handle_right_type = 'FREE'
+        for i in range(len(frames) - 1):
+            left = points[i]
+            right = points[i + 1]
+            delta = right.co - left.co
+            left.handle_right = left.co + delta * _MMD_HANDLE_START
+            right.handle_left = left.co + delta * _MMD_HANDLE_END
+        fcurve.update()
+
+
+def _clean_ik_target(action, armature, bone_name):
+    """清理单个 IK 目标骨骼：静止区间两侧关键帧取相同值。"""
+    bone = armature.data.bones.get(bone_name)
+    location_path = f'pose.bones["{bone_name}"].location'
+    if bone is None or not _curves(action, location_path):
+        return 0
+    curves = _curve_map(action)
+    frames = sorted(_key_times(action, location_path))
+    if len(frames) < 2:
+        return 0
+    local = [
+        Vector([_evaluate(curves, location_path, index, frame, 0.0)
+                for index in range(3)])
+        for frame in frames
+    ]
+    world_rotation = (armature.matrix_world.to_3x3() @
+                      bone.matrix_local.to_3x3())
+    world_points = [world_rotation @ value for value in local]
+    kept = _simplify_indices(world_points, frames, _IK_POSITION_TOLERANCE)
+    positions = {index: world_points[index].copy() for index in kept}
+    for left, right in zip(kept, kept[1:]):
+        if (positions[right] - positions[left]).length <= _IK_POSITION_TOLERANCE:
+            middle = (positions[left] + positions[right]) * 0.5
+            positions[left] = middle.copy()
+            positions[right] = middle.copy()
+    local_rotation = world_rotation.inverted()
+    kept_frames = [frames[index] for index in kept]
+    columns = [
+        [(local_rotation @ positions[index])[axis] for index in kept]
+        for axis in range(3)
+    ]
+    _write_bezier_curves(action, location_path, kept_frames, columns)
+
+    rotation_path = f'pose.bones["{bone_name}"].rotation_quaternion'
+    if _curves(action, rotation_path):
+        quaternions = [_quaternion_at(curves, rotation_path, frame)
+                       for frame in frames]
+        first = quaternions[0]
+        deviation = max(first.rotation_difference(value).angle
+                        for value in quaternions)
+        if deviation <= _IK_ROTATION_TOLERANCE:
+            _write_bezier_curves(action, rotation_path,
+                                 [frames[0], frames[-1]],
+                                 [[first[index]] * 2 for index in range(4)])
+    return 1
+
+
+def clean_ik_keys(armature):
+    """清理两侧 足ＩＫ / つま先ＩＫ 的冗余关键帧，返回处理的骨骼数。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    cleaned = 0
+    for side in ('.L', '.R'):
+        for base in _IK_TARGET_BONES:
+            cleaned += _clean_ik_target(action, armature, base + side)
+    return cleaned
+
+
 _MODE_ITEMS = (
     ('ENABLED', '开启', '执行开启操作'),
     ('DISABLED', '关闭', '执行关闭操作'),
@@ -1210,4 +1325,24 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
         if props is None:
             return {'CANCELLED'}
         props.finger_fix = self.mode
+        return {'FINISHED'}
+
+
+class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.clean_ik_keys'
+    bl_label = '清理 IK 关键帧'
+    bl_description = ('合并 IK 目标骨骼的冗余关键帧：静止区间两侧取相同值，'
+                      '移动区间保留两端并用不过冲的贝塞尔过渡')
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        _root, armature = _selected_model(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        count = clean_ik_keys(armature)
+        if not count:
+            self.report({'ERROR'}, '当前动作没有可清理的 IK 关键帧')
+            return {'CANCELLED'}
+        self.report({'INFO'}, f'已清理 {count} 个 IK 目标骨骼。')
         return {'FINISHED'}
