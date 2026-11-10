@@ -38,9 +38,9 @@ class FLOWHMR2VMD_PT_panel(bpy.types.Panel):
         row = col.row(align=True)
         row.operator('flowhmr2vmd.retarget_smplh', text='执行', icon='PLAY')
 
-class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
-    bl_label = '小功能'
-    bl_idname = 'FLOWHMR2VMD_PT_tools'
+class FLOWHMR2VMD_PT_postprocess(bpy.types.Panel):
+    bl_label = '后处理'
+    bl_idname = 'FLOWHMR2VMD_PT_postprocess'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'FlowHMR2VMD'
@@ -69,6 +69,22 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
                      icon='ACTION')
         col.operator('flowhmr2vmd.clean_body_keys', text='清理身体关键帧',
                      icon='BONE_DATA')
+
+
+class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
+    bl_label = '小功能'
+    bl_idname = 'FLOWHMR2VMD_PT_tools'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'FlowHMR2VMD'
+    bl_order = 2
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        props = context.scene.flowhmr2vmd_properties
+        col = layout.column()
         row = col.row(align=True)
         split = row.split(factor=0.4, align=True)
         split.alignment = 'RIGHT'
