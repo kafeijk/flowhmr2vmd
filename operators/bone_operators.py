@@ -1,17 +1,12 @@
 """Bone-level operators: standardize channels and FK to MMD IK conversion."""
 import functools
+import math
 import time
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
-from ..core import finger_limits, mmd
-
-_BONE_PROGRESS = {
-    'active': False,
-    'factor': 0.0,
-    'text': '',
-}
+from ..core import mmd
 
 
 def timeit(func):
@@ -28,16 +23,6 @@ def timeit(func):
         return result
 
     return wrapper
-
-
-def get_bone_progress():
-    return _BONE_PROGRESS
-
-
-def set_bone_progress(active, factor=0.0, text=''):
-    _BONE_PROGRESS['active'] = bool(active)
-    _BONE_PROGRESS['factor'] = min(max(float(factor), 0.0), 1.0)
-    _BONE_PROGRESS['text'] = text
 
 
 def tag_redraw(context):
@@ -851,90 +836,256 @@ def _reset_waist_pose(armature):
         waist.rotation_euler = (0.0, 0.0, 0.0)
 
 
-_FINGER_BASE_NAMES = (
-    '親指０', '親指１', '親指２',
-    '人指１', '人指２', '人指３',
-    '中指１', '中指２', '中指３',
-    '薬指１', '薬指２', '薬指３',
-    '小指１', '小指２', '小指３',
+# (骨骼链, 保留的局部旋转轴, 接受补偿的骨骼序号；-1 表示不补偿)
+_FINGER_CHAINS = (
+    ('親指０', '親指１', '親指２', 'Z', 1),
+    ('人指１', '人指２', '人指３', 'X', 0),
+    ('中指１', '中指２', '中指３', 'X', 0),
+    ('薬指１', '薬指２', '薬指３', 'X', 0),
+    ('小指１', '小指２', '小指３', 'X', 0),
 )
 
 
-def _select_pose_bone(pose_bone, selected):
-    """跨版本选择骨骼：3.6 用 Bone.select，5.0 起改为 PoseBone.select。"""
-    if hasattr(pose_bone, 'select'):
-        pose_bone.select = selected
-    else:
-        pose_bone.bone.select = selected
+def _keep_axis_rotation(quaternion, axis):
+    """只保留局部欧拉 XYZ 分解中的指定轴旋转。"""
+    euler = quaternion.to_euler('XYZ')
+    values = {'X': euler.x, 'Y': euler.y, 'Z': euler.z}
+    return Euler(tuple(values[name] if name == axis else 0.0
+                       for name in 'XYZ'), 'XYZ').to_quaternion()
 
 
-class FLOWHMR2VMD_OT_bake_fingers(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.bake_fingers'
-    bl_label = '烘焙手指动作'
-    bl_description = '将手指骨骼约束与驱动器的计算结果烘焙到当前动作中'
-    bl_options = {'REGISTER', 'UNDO'}
+_COMPENSATION_LIMIT_DEG = 80.0
 
-    def execute(self, context):
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件。')
-            return {'CANCELLED'}
-        selected = list(context.selected_objects)
-        obj = context.active_object if context.active_object in selected else (
-            selected[0] if selected else None)
-        if obj is None:
-            self.report({'ERROR'}, '请选择 MMD 模型')
-            return {'CANCELLED'}
-        root, armature = mmd.find_root_and_armature(obj)
-        if armature is None:
-            self.report({'ERROR'}, '请选择 MMD 模型')
-            return {'CANCELLED'}
-        state = mmd.read_state(root)
-        if (not state[mmd.STATE_FINGER_LIMITS] and
-                not state[mmd.STATE_FINGER_DRIVER]):
-            self.report({'ERROR'}, '请开启手指约束')
-            return {'CANCELLED'}
-        fingers = [armature.pose.bones[f'{base}{side}']
-                   for side in ('.L', '.R') for base in _FINGER_BASE_NAMES
-                   if armature.pose.bones.get(f'{base}{side}') is not None]
-        if not fingers:
-            self.report({'ERROR'}, '骨架缺少手指骨骼。')
-            return {'CANCELLED'}
 
-        original_scene = context.scene
-        frame_end = int(original_scene.frame_end)
+def _compensation_weight(bend_degrees):
+    """弯曲越大补偿越小；达到 80° 及以上完全不补偿。"""
+    return min(max(1.0 - bend_degrees / _COMPENSATION_LIMIT_DEG, 0.0), 1.0)
 
-        bpy.ops.scene.new(type='NEW')
-        tmp_scene = context.scene
-        tmp_scene.frame_start = 0
-        tmp_scene.frame_end = frame_end
-        # 直接复用原骨架，不拷贝对象；烘焙结果写入同一个 action。
-        tmp_scene.collection.objects.link(armature)
-        for item in context.view_layer.objects:
-            item.select_set(False)
-        armature.select_set(True)
-        context.view_layer.objects.active = armature
-        bpy.ops.object.mode_set(mode='POSE')
-        for pose_bone in armature.pose.bones:
-            _select_pose_bone(pose_bone, False)
-        for pose_bone in fingers:
-            _select_pose_bone(pose_bone, True)
-        bpy.ops.nla.bake(
-            frame_start=0, frame_end=frame_end, visual_keying=True,
-            clear_constraints=True, clear_parents=True,
-            use_current_action=True, clean_curves=True,
-            bake_types={'POSE'})
-        bpy.ops.object.mode_set(mode='OBJECT')
 
-        window = getattr(context, 'window', None)
-        if window is not None:
-            window.scene = original_scene
-        bpy.data.scenes.remove(tmp_scene)
-        # 烘焙后约束已被清除，根对象上的开关同步关闭。
-        mmd.write_state(root, mmd.STATE_FINGER_LIMITS, False)
-        mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
-        self.report({'INFO'},
-                    f'已烘焙 {len(fingers)} 根手指骨骼（0..{frame_end} 帧）。')
-        return {'FINISHED'}
+def _rest_relative_quaternion(bone):
+    if bone.parent is None:
+        return bone.matrix_local.to_quaternion()
+    return (bone.parent.matrix_local.inverted() @
+            bone.matrix_local).to_quaternion()
+
+
+def _world_rotation_at(armature, bone, curves, cache, frame):
+    """按曲线逐级累加骨骼世界旋转，结果按骨骼和帧缓存。"""
+    key = (bone.name, frame)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    chain = []
+    current = bone
+    while current is not None:
+        chain.append(current)
+        current = current.parent
+    rotation = armature.matrix_world.to_quaternion()
+    for item in reversed(chain):
+        path = f'pose.bones["{item.name}"].rotation_quaternion'
+        quaternion = (_quaternion_at(curves, path, frame)
+                      if (path, 0) in curves else Quaternion())
+        rotation = rotation @ _rest_relative_quaternion(item) @ quaternion
+    cache[key] = rotation
+    return rotation
+
+
+def _fix_finger_chain(action, armature, curves, cache, names, axis,
+                      compensate):
+    """修复一条手指链：末端两节只保留 axis 轴旋转，指定指节补偿头连线。
+
+    末端两节按局部欧拉去掉其余轴的旋转；compensate 指定的指节绕世界轴
+    旋转，使「第一指节 head → 第三指节 head」的连线方向与修复前一致；
+    compensate 为 -1 时不做补偿。只做曲线求值与四元数运算，不刷新场景。
+    """
+    bones = [armature.data.bones.get(name) for name in names]
+    poses = [armature.pose.bones.get(name) for name in names]
+    if any(bone is None or pose is None
+           for bone, pose in zip(bones, poses)):
+        return False
+    base_bone = bones[0]
+    parent = base_bone.parent
+    if parent is None:
+        return False
+    paths = [f'pose.bones["{name}"].rotation_quaternion' for name in names]
+    present = [bool(_curves(action, path)) for path in paths]
+    if not present[1] and not present[2]:
+        return False
+    times = set()
+    for path, has in zip(paths, present):
+        if has:
+            times |= _key_times(action, path)
+    if not times:
+        return False
+    frames = list(range(int(min(times)), int(max(times)) + 1))
+    rest_matrices = [bone.matrix_local for bone in bones]
+    rest_quats = [matrix.to_quaternion() for matrix in rest_matrices]
+    r01 = rest_quats[0].inverted() @ rest_quats[1]
+    head1_offset = (rest_quats[0].inverted() @
+                    (rest_matrices[1].to_translation() -
+                     rest_matrices[0].to_translation()))
+    head2_offset = (rest_quats[1].inverted() @
+                    (rest_matrices[2].to_translation() -
+                     rest_matrices[1].to_translation()))
+    axis_y = Vector((0.0, 1.0, 0.0))
+    rest_bend = math.degrees(axis_y.angle((r01 @ axis_y).normalized()))
+    base_rest = _rest_relative_quaternion(base_bone)
+    values = ([], [], [])
+    previous = [None, None, None]
+    for frame in frames:
+        current = [
+            (_quaternion_at(curves, paths[index], frame)
+             if present[index] else poses[index].rotation_quaternion.copy())
+            for index in range(3)
+        ]
+        fixed0 = current[0].copy()
+        fixed1 = _keep_axis_rotation(current[1], axis)
+        fixed2 = _keep_axis_rotation(current[2], axis)
+        if compensate >= 0:
+            parent_rotation = _world_rotation_at(armature, parent, curves,
+                                                 cache, frame)
+            base_frame = (parent_rotation @ base_rest).normalized()
+            m0 = base_frame @ current[0]
+            line_original = m0 @ (head1_offset +
+                                  (r01 @ current[1]) @ head2_offset)
+            line_fixed = m0 @ (head1_offset +
+                               (r01 @ fixed1) @ head2_offset)
+            if line_original.length > 1e-9 and line_fixed.length > 1e-9:
+                bend = math.degrees(axis_y.angle(
+                    ((r01 @ current[1]) @ axis_y).normalized()))
+                weight = _compensation_weight(max(bend - rest_bend, 0.0))
+                if weight > 1e-6:
+                    world_correction = line_fixed.rotation_difference(
+                        line_original)
+                    if weight < 1.0 - 1e-6:
+                        world_correction = Quaternion().slerp(
+                            world_correction, weight)
+                    if compensate == 0:
+                        compensation_frame = base_frame
+                        fixed0 = ((compensation_frame.inverted() @
+                                   world_correction @ compensation_frame) @
+                                  current[0]).normalized()
+                    else:
+                        compensation_frame = (m0 @ r01).normalized()
+                        fixed1 = ((compensation_frame.inverted() @
+                                   world_correction @ compensation_frame) @
+                                  fixed1).normalized()
+        for index, quaternion in enumerate((fixed0, fixed1, fixed2)):
+            if previous[index] is not None and quaternion.dot(previous[index]) < 0:
+                quaternion.negate()
+            previous[index] = quaternion.copy()
+            values[index].append(quaternion)
+    for index in range(3):
+        if index == compensate or present[index]:
+            _write_curves(
+                action, paths[index], frames,
+                [[q[i] for q in values[index]] for i in range(4)],
+                group='finger_fix')
+    return True
+
+
+@timeit
+def fix_fingers(armature):
+    """对两侧所有手指执行修复，返回处理的手指数量。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    curves = _curve_map(action)
+    cache = {}
+    fixed = 0
+    for side in ('.L', '.R'):
+        for chain in _FINGER_CHAINS:
+            names = [name + side for name in chain[:3]]
+            if _fix_finger_chain(action, armature, curves, cache, names,
+                                 chain[3], chain[4]):
+                fixed += 1
+    return fixed
+
+
+_FINGER_BACKUP_PROPS = ('w', 'x', 'y', 'z')
+_FINGER_BACKUP_PREFIX = 'flowhmr_finger_q'
+
+
+def _finger_backup_path(bone_name, component):
+    return f'pose.bones["{bone_name}"]["{_FINGER_BACKUP_PREFIX}{component}"]'
+
+
+def _backup_finger_rotation(action, armature, name):
+    """把骨骼旋转曲线备份到自定义属性；没有曲线的骨骼直接跳过。"""
+    path = f'pose.bones["{name}"].rotation_quaternion'
+    if not _curves(action, path):
+        return False
+    frames = sorted(_key_times(action, path))
+    if not frames:
+        return False
+    curves = _curve_map(action)
+    pose_bone = armature.pose.bones[name]
+    for index, component in enumerate(_FINGER_BACKUP_PROPS):
+        values = [
+            _evaluate(curves, path, index, frame,
+                      1.0 if index == 0 else 0.0)
+            for frame in frames
+        ]
+        _write_custom_property_curve(
+            pose_bone, _FINGER_BACKUP_PREFIX + component, frames, values)
+    return True
+
+
+def _restore_finger_rotation(action, armature, name):
+    """用自定义属性备份恢复骨骼旋转并删除备份曲线。"""
+    backup_paths = [_finger_backup_path(name, component)
+                    for component in _FINGER_BACKUP_PROPS]
+    if not all(_curves(action, path) for path in backup_paths):
+        return False
+    frames = sorted(set().union(*(_key_times(action, path)
+                                  for path in backup_paths)))
+    if not frames:
+        return False
+    curves = _curve_map(action)
+    columns = [
+        [_evaluate(curves, path, 0, frame,
+                   1.0 if component == 'w' else 0.0)
+         for frame in frames]
+        for component, path in zip(_FINGER_BACKUP_PROPS, backup_paths)
+    ]
+    _write_curves(action,
+                  f'pose.bones["{name}"].rotation_quaternion',
+                  frames, columns, group='finger_fix')
+    for path in backup_paths:
+        _remove_curves(action, path)
+    return True
+
+
+def apply_finger_fix(armature):
+    """备份原始旋转后执行手指修复；缺少的骨骼直接跳过。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    for side in ('.L', '.R'):
+        for chain in _FINGER_CHAINS:
+            for base in chain[:3]:
+                name = base + side
+                if armature.pose.bones.get(name) is None:
+                    continue
+                _backup_finger_rotation(action, armature, name)
+    return fix_fingers(armature)
+
+
+def revert_finger_fix(armature):
+    """用备份把两侧手指旋转恢复到修复前，返回恢复的骨骼数量。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    restored = 0
+    for side in ('.L', '.R'):
+        for chain in _FINGER_CHAINS:
+            for base in chain[:3]:
+                name = base + side
+                if armature.pose.bones.get(name) is None:
+                    continue
+                if _restore_finger_rotation(action, armature, name):
+                    restored += 1
+    return restored
 
 
 _MODE_ITEMS = (
@@ -1044,75 +1195,19 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class FLOWHMR2VMD_OT_finger_limits(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.finger_limits'
-    bl_label = '手指约束'
-    bl_description = '开启时给手指骨骼添加限制旋转约束，关闭时删除本插件添加的约束'
-    bl_options = {'UNDO'}
+class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
+    """UI 按钮：只写入枚举属性，实际逻辑由 finger_fix 的 update 回调处理。"""
+    bl_idname = 'flowhmr2vmd.set_finger_fix'
+    bl_label = '手指修复'
+    bl_description = '设置手指修复开关'
+    bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
-                                 default='ENABLED')
+                                 default='DISABLED')
 
     def execute(self, context):
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
-            return {'CANCELLED'}
-        root, armature = _selected_model(context)
-        if armature is None:
-            self.report({'ERROR'}, '请选择 MMD 模型')
-            return {'CANCELLED'}
         props = getattr(context.scene, 'flowhmr2vmd_properties', None)
         if props is None:
             return {'CANCELLED'}
-        if self.mode == 'ENABLED':
-            missing = [f'{base}{side}'
-                       for base in finger_limits.all_limits(props)
-                       for side in ('.L', '.R')
-                       if armature.pose.bones.get(base + side) is None]
-            if missing:
-                self.report({'ERROR'}, '骨架缺少手指骨骼：' + '、'.join(missing))
-                return {'CANCELLED'}
-            finger_limits.apply_finger_limits(armature, props)
-            mmd.write_state(root, mmd.STATE_FINGER_LIMITS, True)
-        else:
-            finger_limits.remove_finger_drivers(armature)
-            finger_limits.remove_finger_limits(armature)
-            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
-            mmd.write_state(root, mmd.STATE_FINGER_LIMITS, False)
-        return {'FINISHED'}
-
-
-class FLOWHMR2VMD_OT_finger_driver(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.finger_driver'
-    bl_label = '手指约束驱动器'
-    bl_description = '开启时给手指约束添加驱动器，关闭时移除驱动器并恢复面板范围'
-    bl_options = {'UNDO'}
-
-    mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
-                                 default='ENABLED')
-
-    def execute(self, context):
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
-            return {'CANCELLED'}
-        root, armature = _selected_model(context)
-        if armature is None:
-            self.report({'ERROR'}, '请选择 MMD 模型')
-            return {'CANCELLED'}
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            return {'CANCELLED'}
-        state = mmd.read_state(root)
-        if self.mode == 'ENABLED':
-            if not state[mmd.STATE_FINGER_LIMITS]:
-                self.report({'ERROR'}, '请先开启手指约束')
-                return {'CANCELLED'}
-            finger_limits.apply_finger_limits(armature, props)
-            finger_limits.apply_finger_drivers(armature, props, context.scene)
-            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, True)
-        else:
-            finger_limits.remove_finger_drivers(armature)
-            if state[mmd.STATE_FINGER_LIMITS]:
-                finger_limits.apply_finger_limits(armature, props)
-            mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
+        props.finger_fix = self.mode
         return {'FINISHED'}

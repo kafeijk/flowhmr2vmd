@@ -6,11 +6,11 @@ import traceback
 import bpy
 import numpy as np
 
-from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
+from ..core import bake, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
-from .bone_operators import (clear_toe_bone_curves, convert_toe_rotation,
-                             restore_toe_from_custom, standardize_channels,
-                             store_toe_to_custom)
+from .bone_operators import (apply_finger_fix, clear_toe_bone_curves,
+                             convert_toe_rotation, restore_toe_from_custom,
+                             standardize_channels, store_toe_to_custom)
 
 
 def _middle_spine_name(bones):
@@ -206,7 +206,6 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
 
         # 重定向后自动标准化：腰 旋转增量到 上半身/下半身，位移搬到 センター。
         standardize_channels(armature)
-        model_state = mmd.read_state(root)
         toe_enabled = bool(props is not None and
                            props.toe_rotation == 'ENABLED')
         if not has_toe and has_tip:
@@ -218,11 +217,8 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         elif has_toe:
             # 关闭脚尖旋转：清掉 FK→IK 阶段写出的 足先EX 姿态并归位。
             clear_toe_bone_curves(armature)
-
-        if props is not None and model_state[mmd.STATE_FINGER_LIMITS]:
-            finger_limits.apply_finger_limits(armature, props)
-            if model_state[mmd.STATE_FINGER_DRIVER]:
-                finger_limits.apply_finger_drivers(armature, props, context.scene)
+        if props is not None and props.finger_fix == 'ENABLED':
+            apply_finger_fix(armature)
 
         text = (f"已完成重定向，共 {result['frames']} 帧。")
         if not has_upper1:
@@ -238,26 +234,6 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             self.report({'WARNING'},
                         '读取 corrected_initial.pt 失败，已用工程 rig 旋转代替 native 旋转：'
                         + str(score['pt_fallback'])[-200:])
-        return {'FINISHED'}
-
-
-class FLOWHMR2VMD_OT_reset_finger_limits(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.reset_finger_limits'
-    bl_label = '将手指约束的角度范围恢复为默认值'
-    bl_description = '将手指约束的角度范围恢复为默认值'
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            self.report({'ERROR'}, '找不到插件属性。')
-            return {'CANCELLED'}
-        rna = props.bl_rna.properties
-        for name in finger_limits.property_names():
-            item = rna.get(name)
-            if item is not None:
-                setattr(props, name, item.default)
-        self.report({'INFO'}, '手指约束的角度范围已恢复为默认值。')
         return {'FINISHED'}
 
 
