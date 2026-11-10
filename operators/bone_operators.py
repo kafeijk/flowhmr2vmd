@@ -519,28 +519,149 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
 
 
 _TOE_BONES = ('つま先', '足先EX')
+_TOE_CUSTOM_PROPS = ('w', 'x', 'y', 'z')
+
+
+def _toe_custom_path(side, component):
+    return f'pose.bones["{_TOE_BONES[1]}{side}"]["flowhmr_toe_q{component}"]'
+
+
+def _has_toe_custom(action, side):
+    return all(_curves(action, _toe_custom_path(side, component))
+               for component in _TOE_CUSTOM_PROPS)
+
+
+def clear_toe_bone_curves(armature, side=None):
+    """清空 足先EX 的骨骼关键帧，保留自定义属性通道。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    sides = (side,) if side else ('.L', '.R')
+    cleared = False
+    for value in sides:
+        prefix = f'pose.bones["{_TOE_BONES[1]}{value}"]'
+        for fcurve in [fc for fc in action.fcurves
+                       if fc.data_path.startswith(prefix + '.')]:
+            action.fcurves.remove(fcurve)
+            cleared = True
+    return cleared
+
+
+def _write_custom_property_curve(pose_bone, prop_name, frames, values):
+    """写入骨骼自定义属性曲线；用 keyframe_insert 建立正确的 action slot。"""
+    action = pose_bone.id_data.animation_data.action
+    data_path = f'pose.bones["{pose_bone.name}"]["{prop_name}"]'
+    for fcurve in [fc for fc in action.fcurves if fc.data_path == data_path]:
+        action.fcurves.remove(fcurve)
+    pose_bone[prop_name] = values[0]
+    pose_bone.keyframe_insert(f'["{prop_name}"]', frame=frames[0])
+    fcurve = next((fc for fc in action.fcurves
+                   if fc.data_path == data_path and fc.array_index == 0), None)
+    if fcurve is None:
+        return False
+    fcurve.keyframe_points.clear()
+    fcurve.keyframe_points.add(len(frames))
+    for point, frame, value in zip(fcurve.keyframe_points, frames, values):
+        point.co = (frame, value)
+        point.interpolation = 'LINEAR'
+    fcurve.update()
+    return True
+
+
+def store_toe_to_custom(armature):
+    """把 足先EX 的旋转曲线备份到自定义属性，并清空骨骼关键帧。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    stored = False
+    for side in ('.L', '.R'):
+        if armature.pose.bones.get(_TOE_BONES[1] + side) is None:
+            continue
+        pose_bone = armature.pose.bones[_TOE_BONES[1] + side]
+        rotation_path = f'pose.bones["{_TOE_BONES[1]}{side}"].rotation_quaternion'
+        if not _curves(action, rotation_path):
+            continue
+        frames = sorted(_key_times(action, rotation_path))
+        if not frames:
+            continue
+        curves = _curve_map(action)
+        for index, component in enumerate(_TOE_CUSTOM_PROPS):
+            prop_name = f'flowhmr_toe_q{component}'
+            if pose_bone.get(prop_name) is None:
+                pose_bone[prop_name] = 1.0 if index == 0 else 0.0
+            values = [_evaluate(curves, rotation_path, index, frame,
+                                1.0 if index == 0 else 0.0)
+                      for frame in frames]
+            _write_custom_property_curve(pose_bone, prop_name, frames, values)
+        clear_toe_bone_curves(armature, side)
+        stored = True
+    return stored
+
+
+def restore_toe_from_custom(armature):
+    """把自定义属性里的脚尖旋转恢复到 足先EX 骨骼曲线。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    restored = False
+    for side in ('.L', '.R'):
+        if armature.pose.bones.get(_TOE_BONES[1] + side) is None:
+            continue
+        paths = [_toe_custom_path(side, component)
+                 for component in _TOE_CUSTOM_PROPS]
+        if not all(_curves(action, path) for path in paths):
+            continue
+        frames = sorted(set().union(*(_key_times(action, path)
+                                      for path in paths)))
+        if not frames:
+            continue
+        curves = _curve_map(action)
+        columns = [
+            [_evaluate(curves, path, 0, frame,
+                       1.0 if component == 'w' else 0.0)
+             for frame in frames]
+            for component, path in zip(_TOE_CUSTOM_PROPS, paths)
+        ]
+        _write_curves(action,
+                      f'pose.bones["{_TOE_BONES[1]}{side}"].rotation_quaternion',
+                      frames, columns, group='toe')
+        restored = True
+    return restored
 
 
 @timeit
 def convert_toe_rotation(armature, enabled):
-    """在 つま先 与 足先EX 之间搬运旋转；返回 (成功, 错误信息)。
+    """在 つま先 与 足先EX 之间搬运旋转；没有 つま先 时使用自定义属性。
 
-    开启：つま先 → 足先EX；关闭：足先EX → つま先。
-    两侧骨骼必须齐全，缺一侧按两侧都缺处理；没有动作或没有可转换的
-    关键帧时静默跳过（这个开关只表示意图，不保证一定有数据）。
+    开启：つま先 → 足先EX；没有 つま先 时：自定义属性 → 足先EX。
+    关闭：足先EX → つま先；没有 つま先 时：清空 足先EX 骨骼关键帧。
+    没有 足先EX 时直接丢弃，不报错。
     """
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return True, ''
     bones = armature.data.bones
-    missing = [f'{stem}{side}' for side in ('.L', '.R') for stem in _TOE_BONES
-               if bones.get(f'{stem}{side}') is None]
-    if missing:
-        return False, '缺少骨骼：' + '、'.join(missing) + '（缺一即两侧都缺）'
-    source, target = ((_TOE_BONES[0], _TOE_BONES[1]) if enabled
-                      else (_TOE_BONES[1], _TOE_BONES[0]))
-    for side in ('.L', '.R'):
-        _convert_bone_rotation(action, armature, source + side, target + side)
+    has_toe = all(bones.get(f'{_TOE_BONES[0]}{side}') is not None
+                  for side in ('.L', '.R'))
+    has_tip = all(bones.get(f'{_TOE_BONES[1]}{side}') is not None
+                  for side in ('.L', '.R'))
+    if not has_tip:
+        if enabled:
+            return False, '骨架缺少「足先EX」骨骼，无法开启脚尖旋转。'
+        return True, ''
+    if has_toe:
+        source, target = ((_TOE_BONES[0], _TOE_BONES[1]) if enabled
+                          else (_TOE_BONES[1], _TOE_BONES[0]))
+        for side in ('.L', '.R'):
+            _convert_bone_rotation(action, armature, source + side,
+                                   target + side)
+        return True, ''
+    if enabled:
+        restore_toe_from_custom(armature)
+    elif any(_has_toe_custom(action, side) for side in ('.L', '.R')):
+        clear_toe_bone_curves(armature)
+    else:
+        store_toe_to_custom(armature)
     return True, ''
 
 
@@ -816,29 +937,21 @@ def _selected_model(context):
     return root, armature
 
 
-class FLOWHMR2VMD_OT_rotate_toe(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.rotate_toe'
+class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
+    """UI 按钮：只写入枚举属性，实际逻辑由 toe_rotation 的 update 回调处理。"""
+    bl_idname = 'flowhmr2vmd.set_toe_rotation'
     bl_label = '脚尖旋转'
-    bl_description = '开启后可使脚尖旋转，请根据实际效果来决定是否开启'
-    bl_options = {'UNDO'}
+    bl_description = '设置脚尖旋转开关'
+    bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
-                                 default='ENABLED')
+                                 default='DISABLED')
 
     def execute(self, context):
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件')
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is None:
             return {'CANCELLED'}
-        root, armature = _selected_model(context)
-        if armature is None:
-            self.report({'ERROR'}, '请选择 MMD 模型')
-            return {'CANCELLED'}
-        enabled = self.mode == 'ENABLED'
-        ok, message = convert_toe_rotation(armature, enabled)
-        if not ok:
-            self.report({'ERROR'}, message)
-            return {'CANCELLED'}
-        mmd.write_state(root, mmd.STATE_ROTATE_TOE, enabled)
+        props.toe_rotation = self.mode
         return {'FINISHED'}
 
 

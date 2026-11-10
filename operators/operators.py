@@ -8,7 +8,8 @@ import numpy as np
 
 from ..core import bake, finger_limits, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
-from .bone_operators import convert_toe_rotation, standardize_channels
+from .bone_operators import (convert_toe_rotation, restore_toe_from_custom,
+                             standardize_channels, store_toe_to_custom)
 
 
 def _middle_spine_name(bones):
@@ -132,13 +133,11 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         # 任一侧缺少 つま先 就按两侧都没有处理，只留一半没有意义。
         has_toe = all(bones.get(f'つま先{side}') is not None
                       for side in ('.L', '.R'))
+        has_tip = all(bones.get(f'足先EX{side}') is not None
+                      for side in ('.L', '.R'))
         missing = [name for index, name in enumerate(mapping)
                    if index not in OPTIONAL_MAPPING_INDEX and
                    bones.get(name) is None]
-        if not has_toe:
-            # 没有 つま先 时，足先EX 是必备的次标准脚尖骨骼。
-            missing.extend(f'足先EX{side}' for side in ('.L', '.R')
-                           if bones.get(f'足先EX{side}') is None)
         if missing:
             self.report({'ERROR'}, '骨架缺少以下必需骨骼：' + '、'.join(missing))
             return {'CANCELLED'}
@@ -155,7 +154,11 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             mapping[6] = '上半身2'
             skip_indices.append(6)
         if not has_toe:
-            skip_indices.extend((10, 11))
+            if has_tip:
+                mapping[10] = '足先EX.L'
+                mapping[11] = '足先EX.R'
+            else:
+                skip_indices.extend((10, 11))
         meshes = mmd.meshes_for(armature)
         rest = np.empty((22, 3), np.float64)
 
@@ -167,7 +170,8 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             if index == 6 and not has_upper1:
                 rest[index] = (head('上半身') + head('上半身2')) * .5
             elif index in (10, 11) and not has_toe:
-                rest[index] = head('足先EX' + ('.L' if index == 10 else '.R'))
+                side = '.L' if index == 10 else '.R'
+                rest[index] = head(('足先EX' if has_tip else '足首') + side)
             else:
                 rest[index] = head(name)
 
@@ -202,7 +206,13 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         # 重定向后自动标准化：腰 旋转增量到 上半身/下半身，位移搬到 センター。
         standardize_channels(armature)
         model_state = mmd.read_state(root)
-        if props is not None and model_state[mmd.STATE_ROTATE_TOE] and has_toe:
+        toe_enabled = bool(props is not None and
+                           props.toe_rotation == 'ENABLED')
+        if not has_toe and has_tip:
+            store_toe_to_custom(armature)
+            if toe_enabled:
+                restore_toe_from_custom(armature)
+        elif has_toe and toe_enabled:
             convert_toe_rotation(armature, True)
 
         if props is not None and model_state[mmd.STATE_FINGER_LIMITS]:
@@ -214,7 +224,11 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         if not has_upper1:
             text += ' 缺少脊柱中间骨，结果已并入「上半身2」。'
         if not has_toe:
-            text += ' 缺少「つま先」，脚尖旋转已丢弃。'
+            if has_tip:
+                text += (' 缺少「つま先」，脚尖旋转已存入「足先EX」的自定义通道'
+                         '（开关默认关闭）。')
+            else:
+                text += ' 缺少「つま先」和「足先EX」，脚尖数据已丢弃。'
         self.report({'INFO'}, text)
         if score.get('pt_fallback'):
             self.report({'WARNING'},

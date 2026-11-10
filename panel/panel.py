@@ -69,8 +69,8 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
         props = scene.flowhmr2vmd_properties
         state = _model_state(context)
         col = layout.column()
-        _toggle_row(col, '脚尖旋转', 'flowhmr2vmd.rotate_toe',
-                    state[mmd.STATE_ROTATE_TOE])
+        _toggle_row(col, '脚尖旋转', 'flowhmr2vmd.set_toe_rotation',
+                    props.toe_rotation == 'ENABLED')
         progress = get_bone_progress()
         if progress['active']:
             if hasattr(col, 'progress'):
