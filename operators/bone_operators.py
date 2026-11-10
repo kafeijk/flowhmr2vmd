@@ -869,7 +869,7 @@ def _rest_relative_quaternion(bone):
             bone.matrix_local).to_quaternion()
 
 
-def _world_rotation_at(armature, bone, curves, cache, frame):
+def _bone_world_rotation_at(armature, bone, curves, cache, frame):
     """按曲线逐级累加骨骼世界旋转，结果按骨骼和帧缓存。"""
     key = (bone.name, frame)
     cached = cache.get(key)
@@ -942,8 +942,8 @@ def _fix_finger_chain(action, armature, curves, cache, names, axis,
         fixed1 = _keep_axis_rotation(current[1], axis)
         fixed2 = _keep_axis_rotation(current[2], axis)
         if compensate >= 0:
-            parent_rotation = _world_rotation_at(armature, parent, curves,
-                                                 cache, frame)
+            parent_rotation = _bone_world_rotation_at(armature, parent,
+                                                      curves, cache, frame)
             base_frame = (parent_rotation @ base_rest).normalized()
             m0 = base_frame @ current[0]
             line_original = m0 @ (head1_offset +
@@ -1181,7 +1181,7 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
     """UI 按钮：只写入枚举属性，实际逻辑由 toe_rotation 的 update 回调处理。"""
     bl_idname = 'flowhmr2vmd.set_toe_rotation'
     bl_label = '脚尖旋转'
-    bl_description = '设置脚尖旋转开关'
+    bl_description = '设置脚尖旋转开关\n注：虽然动捕数据中包含脚尖旋转的关键帧，但MMD通常不会为脚尖骨骼注册关键帧'
     bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
