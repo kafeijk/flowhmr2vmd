@@ -69,6 +69,14 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
         props = scene.flowhmr2vmd_properties
         state = _model_state(context)
         col = layout.column()
+        row = col.row(align=True)
+        split = row.split(factor=0.4, align=True)
+        split.alignment = 'RIGHT'
+        split.label(text='单侧脚间距')
+        right = split.row(align=True)
+        right.prop(props, 'foot_spacing', text='')
+        right.operator('flowhmr2vmd.adjust_foot_spacing', text='',
+                       icon='ARROW_LEFTRIGHT')
         _toggle_row(col, '脚尖旋转', 'flowhmr2vmd.set_toe_rotation',
                     props.toe_rotation == 'ENABLED')
         progress = get_bone_progress()

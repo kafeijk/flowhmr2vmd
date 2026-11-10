@@ -102,6 +102,15 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         default='DISABLED',
         update=_update_toe_rotation,
     )
+    foot_spacing: bpy.props.FloatProperty(
+        name='脚间距',
+        description='调整足ＩＫ时左右各偏移的米数（左向 +X，右向 -X）',
+        default=0.0,
+        min=-1.0,
+        max=1.0,
+        step=10,
+        precision=2,
+    )
     show_finger_limits: bpy.props.BoolProperty(
         name='展开手指骨骼设置',
         description='展开手指骨骼设置',

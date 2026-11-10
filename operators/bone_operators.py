@@ -937,6 +937,77 @@ def _selected_model(context):
     return root, armature
 
 
+def adjust_foot_spacing(armature, spacing_m):
+    """足ＩＫ.L 向世界 +X、足ＩＫ.R 向世界 -X 平移 spacing_m 米。"""
+    shift = float(spacing_m)
+    if abs(shift) < 1e-9:
+        return False
+    action = armature.animation_data.action if armature.animation_data else None
+    found = False
+    for side, sign in (('.L', 1.0), ('.R', -1.0)):
+        pose_bone = armature.pose.bones.get(f'足ＩＫ{side}')
+        if pose_bone is None:
+            continue
+        found = True
+        rest_rotation = (armature.matrix_world @
+                         pose_bone.bone.matrix_local).to_quaternion()
+        delta = rest_rotation.inverted() @ Vector((sign * shift, 0.0, 0.0))
+        path = pose_bone.path_from_id('location')
+        curves = ({fc.array_index: fc for fc in action.fcurves
+                   if fc.data_path == path} if action is not None else {})
+        if not curves:
+            pose_bone.location += delta
+            continue
+        frames = sorted({round(point.co.x) for fcurve in curves.values()
+                         for point in fcurve.keyframe_points})
+        if not frames:
+            pose_bone.location += delta
+            continue
+        for index in range(3):
+            fcurve = curves.get(index)
+            if fcurve is None:
+                fcurve = action.fcurves.new(path, index=index,
+                                            action_group='standardize')
+                fcurve.keyframe_points.add(len(frames))
+                base = pose_bone.location[index] + delta[index]
+                for point, frame in zip(fcurve.keyframe_points, frames):
+                    point.co = (frame, base)
+                    point.interpolation = 'LINEAR'
+                fcurve.update()
+                continue
+            amount = delta[index]
+            for point in fcurve.keyframe_points:
+                point.co.y += amount
+                point.handle_left.y += amount
+                point.handle_right.y += amount
+            fcurve.update()
+    return found
+
+
+class FLOWHMR2VMD_OT_adjust_foot_spacing(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.adjust_foot_spacing'
+    bl_label = '调整脚间距'
+    bl_description = '按「脚间距」参数平移左右足ＩＫ：左足向 +X，右足向 -X'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        root, armature = _selected_model(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is None:
+            return {'CANCELLED'}
+        spacing = float(props.foot_spacing)
+        if abs(spacing) < 1e-9:
+            return {'FINISHED'}
+        if not adjust_foot_spacing(armature, spacing):
+            self.report({'ERROR'}, '骨架缺少 足ＩＫ 骨骼')
+            return {'CANCELLED'}
+        context.view_layer.update()
+        return {'FINISHED'}
+
+
 class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
     """UI 按钮：只写入枚举属性，实际逻辑由 toe_rotation 的 update 回调处理。"""
     bl_idname = 'flowhmr2vmd.set_toe_rotation'
