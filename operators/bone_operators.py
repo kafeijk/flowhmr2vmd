@@ -1091,6 +1091,7 @@ def revert_finger_fix(armature):
 _IK_TARGET_BONES = ('足ＩＫ', 'つま先ＩＫ')
 _IK_POSITION_TOLERANCE = 0.005
 _IK_ROTATION_TOLERANCE = math.radians(0.5)
+_ROTATION_CLEAN_TOLERANCE = math.radians(1.0)
 _MMD_HANDLE_START = 20.0 / 127.0
 _MMD_HANDLE_END = 107.0 / 127.0
 
@@ -1122,6 +1123,21 @@ def _simplify_indices(points, frames, tolerance):
     return sorted(keep)
 
 
+def _set_straight_bezier(fcurve):
+    points = fcurve.keyframe_points
+    for i in range(len(points)):
+        points[i].interpolation = 'BEZIER'
+        points[i].handle_left_type = 'FREE'
+        points[i].handle_right_type = 'FREE'
+    for i in range(len(points) - 1):
+        left = points[i]
+        right = points[i + 1]
+        delta = right.co - left.co
+        left.handle_right = left.co + delta * _MMD_HANDLE_START
+        right.handle_left = left.co + delta * _MMD_HANDLE_END
+    fcurve.update()
+
+
 def _write_bezier_curves(action, path, frames, columns, group='ik_clean'):
     """写入贝塞尔曲线：控制点落在弦上（MMD 的 20/127、107/127），不会过冲。"""
     _remove_curves(action, path)
@@ -1130,22 +1146,56 @@ def _write_bezier_curves(action, path, frames, columns, group='ik_clean'):
         points = fcurve.keyframe_points
         points.add(len(frames))
         for i, (frame, value) in enumerate(zip(frames, values)):
-            point = points[i]
-            point.co = (float(frame), float(value))
-            point.interpolation = 'BEZIER'
-            point.handle_left_type = 'FREE'
-            point.handle_right_type = 'FREE'
-        for i in range(len(frames) - 1):
-            left = points[i]
-            right = points[i + 1]
-            delta = right.co - left.co
-            left.handle_right = left.co + delta * _MMD_HANDLE_START
-            right.handle_left = left.co + delta * _MMD_HANDLE_END
-        fcurve.update()
+            points[i].co = (float(frame), float(value))
+        _set_straight_bezier(fcurve)
 
 
-def _clean_ik_target(action, armature, bone_name):
-    """清理单个 IK 目标骨骼：静止区间两侧关键帧取相同值。"""
+def _simplified_quaternion_columns(quaternions, frames):
+    kept = _simplify_rotation_indices(quaternions, frames,
+                                      _ROTATION_CLEAN_TOLERANCE)
+    values = {index: quaternions[index].copy() for index in kept}
+    for left, right in zip(kept, kept[1:]):
+        first = values[left]
+        second = values[right]
+        if first.dot(second) < 0.0:
+            second = Quaternion((-second.w, -second.x, -second.y, -second.z))
+        if first.rotation_difference(second).angle <= _ROTATION_CLEAN_TOLERANCE:
+            middle = first.slerp(second, 0.5)
+            values[left] = middle.copy()
+            values[right] = middle.copy()
+    kept_frames = [frames[index] for index in kept]
+    columns = [[values[index][axis] for index in kept] for axis in range(4)]
+    return kept_frames, columns
+
+
+def _simplify_rotation_indices(quaternions, frames, tolerance):
+    if len(quaternions) < 3:
+        return list(range(len(quaternions)))
+    keep = {0, len(quaternions) - 1}
+    stack = [(0, len(quaternions) - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end <= start + 1:
+            continue
+        span = frames[end] - frames[start]
+        worst = 0.0
+        worst_index = -1
+        for index in range(start + 1, end):
+            ratio = (frames[index] - frames[start]) / span if span else 0.5
+            expected = quaternions[start].slerp(quaternions[end], ratio)
+            deviation = expected.rotation_difference(
+                quaternions[index]).angle
+            if deviation > worst:
+                worst = deviation
+                worst_index = index
+        if worst > tolerance:
+            keep.add(worst_index)
+            stack.append((start, worst_index))
+            stack.append((worst_index, end))
+    return sorted(keep)
+
+
+def _clean_bone_keys(action, armature, bone_name, stats):
     bone = armature.data.bones.get(bone_name)
     location_path = f'pose.bones["{bone_name}"].location'
     if bone is None or not _curves(action, location_path):
@@ -1176,6 +1226,13 @@ def _clean_ik_target(action, armature, bone_name):
         for axis in range(3)
     ]
     _write_bezier_curves(action, location_path, kept_frames, columns)
+    final_frames = set(kept_frames)
+    new_curves = _curve_map(action)
+    for frame, value in zip(frames, local):
+        updated = Vector([_evaluate(new_curves, location_path, index, frame)
+                          for index in range(3)])
+        delta = (world_rotation @ (updated - value)).length
+        stats['position'] = max(stats['position'], delta)
 
     rotation_path = f'pose.bones["{bone_name}"].rotation_quaternion'
     if _curves(action, rotation_path):
@@ -1188,18 +1245,208 @@ def _clean_ik_target(action, armature, bone_name):
             _write_bezier_curves(action, rotation_path,
                                  [frames[0], frames[-1]],
                                  [[first[index]] * 2 for index in range(4)])
+            final_frames.update((frames[0], frames[-1]))
+            new_curves = _curve_map(action)
+            for frame, value in zip(frames, quaternions):
+                updated = _quaternion_at(new_curves, rotation_path, frame)
+                stats['rotation'] = max(
+                    stats['rotation'],
+                    value.rotation_difference(updated).angle)
+    stats['removed'] += len(set(frames) - final_frames)
     return 1
 
 
-def clean_ik_keys(armature):
-    """清理两侧 足ＩＫ / つま先ＩＫ 的冗余关键帧，返回处理的骨骼数。"""
+def _clean_rotation_curves(action, armature, bone_name, stats):
+    bone = armature.data.bones.get(bone_name)
+    path = f'pose.bones["{bone_name}"].rotation_quaternion'
+    if bone is None or not _curves(action, path):
+        return 0
+    curves = _curve_map(action)
+    frames = sorted(_key_times(action, path))
+    if len(frames) < 2:
+        return 0
+    quaternions = [_quaternion_at(curves, path, frame) for frame in frames]
+    kept_frames, columns = _simplified_quaternion_columns(quaternions, frames)
+    _write_bezier_curves(action, path, kept_frames, columns)
+    new_curves = _curve_map(action)
+    for frame, value in zip(frames, quaternions):
+        updated = _quaternion_at(new_curves, path, frame)
+        stats['rotation'] = max(stats['rotation'],
+                                value.rotation_difference(updated).angle)
+    stats['removed'] += len(set(frames) - set(kept_frames))
+    return 1
+
+
+def clean_ik_keys(armature, stats):
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return 0
     cleaned = 0
     for side in ('.L', '.R'):
         for base in _IK_TARGET_BONES:
-            cleaned += _clean_ik_target(action, armature, base + side)
+            cleaned += _clean_bone_keys(action, armature, base + side, stats)
+    return cleaned
+
+
+def clean_center_keys(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return _clean_bone_keys(action, armature, _CENTER_BONE, stats)
+
+
+def clean_waist_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return _clean_rotation_curves(action, armature, _WAIST_BONE, stats)
+
+
+def clean_foot_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return sum(_clean_rotation_curves(action, armature, '足' + side, stats)
+               for side in ('.L', '.R'))
+
+
+def clean_ankle_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return sum(_clean_rotation_curves(action, armature, '足首' + side, stats)
+               for side in ('.L', '.R'))
+
+
+def clean_lower_body_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return _clean_rotation_curves(action, armature, '下半身', stats)
+
+
+def _write_custom_bezier(pose_bone, prop_name, frames, values):
+    if not _write_custom_property_curve(pose_bone, prop_name, frames, values):
+        return False
+    action = pose_bone.id_data.animation_data.action
+    data_path = f'pose.bones["{pose_bone.name}"]["{prop_name}"]'
+    fcurve = next((fc for fc in action.fcurves
+                   if fc.data_path == data_path and fc.array_index == 0), None)
+    if fcurve is None:
+        return False
+    _set_straight_bezier(fcurve)
+    return True
+
+
+def _clean_toe_side(action, armature, side, stats):
+    name = _TOE_BONES[1] + side
+    pose_bone = armature.pose.bones.get(name)
+    if pose_bone is None:
+        return 0
+    rotation_path = f'pose.bones["{name}"].rotation_quaternion'
+    custom_paths = [_toe_custom_path(side, component)
+                    for component in _TOE_CUSTOM_PROPS]
+    curves = _curve_map(action)
+    bone_frames = (sorted(_key_times(action, rotation_path))
+                   if _curves(action, rotation_path) else [])
+    custom_frames = (sorted(set().union(*(_key_times(action, path)
+                                          for path in custom_paths)))
+                     if all(_curves(action, path) for path in custom_paths)
+                     else [])
+    if not bone_frames and not custom_frames:
+        return 0
+    original = set(bone_frames) | set(custom_frames)
+    final = set()
+    if bone_frames:
+        quaternions = [_quaternion_at(curves, rotation_path, frame)
+                       for frame in bone_frames]
+        kept_frames, columns = _simplified_quaternion_columns(
+            quaternions, bone_frames)
+        _write_bezier_curves(action, rotation_path, kept_frames, columns)
+        final.update(kept_frames)
+        new_curves = _curve_map(action)
+        for frame, value in zip(bone_frames, quaternions):
+            updated = _quaternion_at(new_curves, rotation_path, frame)
+            stats['rotation'] = max(stats['rotation'],
+                                    value.rotation_difference(updated).angle)
+    if custom_frames:
+        stored = [
+            Quaternion([
+                _evaluate(curves, path, 0, frame,
+                          1.0 if component == 'w' else 0.0)
+                for component, path in zip(_TOE_CUSTOM_PROPS, custom_paths)
+            ]).normalized()
+            for frame in custom_frames
+        ]
+        kept_frames, columns = _simplified_quaternion_columns(
+            stored, custom_frames)
+        for index, path in enumerate(custom_paths):
+            prop = f'flowhmr_toe_q{_TOE_CUSTOM_PROPS[index]}'
+            _write_custom_bezier(pose_bone, prop, kept_frames,
+                                 columns[index])
+        final.update(kept_frames)
+        new_curves = _curve_map(action)
+        for frame, value in zip(custom_frames, stored):
+            updated = Quaternion([
+                _evaluate(new_curves, path, 0, frame,
+                          1.0 if component == 'w' else 0.0)
+                for component, path in zip(_TOE_CUSTOM_PROPS, custom_paths)
+            ]).normalized()
+            stats['rotation'] = max(stats['rotation'],
+                                    value.rotation_difference(updated).angle)
+    stats['removed'] += len(original - final)
+    return 1
+
+
+def clean_toe_tip(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return sum(_clean_toe_side(action, armature, side, stats)
+               for side in ('.L', '.R'))
+
+
+def clean_toe_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    return sum(_clean_rotation_curves(action, armature, 'つま先' + side, stats)
+               for side in ('.L', '.R'))
+
+
+_BODY_ROTATION_BONES = (
+    '上半身', '上半身1', '上半身2', '首', '頭',
+    '肩.L', '肩.R', '腕.L', '腕.R', 'ひじ.L', 'ひじ.R',
+    '手首.L', '手首.R',
+)
+_FINGER_CLEAN_BONES = (
+    '親指０', '親指１', '親指２',
+    '人指１', '人指２', '人指３',
+    '中指１', '中指２', '中指３',
+    '薬指１', '薬指２', '薬指３',
+    '小指１', '小指２', '小指３',
+)
+
+
+def clean_body_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    cleaned = 0
+    for name in _BODY_ROTATION_BONES:
+        cleaned += _clean_rotation_curves(action, armature, name, stats)
+    return cleaned
+
+
+def clean_finger_rotation(armature, stats):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    cleaned = 0
+    for side in ('.L', '.R'):
+        for base in _FINGER_CLEAN_BONES:
+            cleaned += _clean_rotation_curves(action, armature,
+                                              base + side, stats)
     return cleaned
 
 
@@ -1330,9 +1577,9 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
 
 class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.clean_ik_keys'
-    bl_label = '清理 IK 关键帧'
-    bl_description = ('合并 IK 目标骨骼的冗余关键帧：静止区间两侧取相同值，'
-                      '移动区间保留两端并用不过冲的贝塞尔过渡')
+    bl_label = '清理足部关键帧'
+    bl_description = ('清理 センター、足ＩＫ/つま先ＩＫ、腰/足/足首 的冗余关键帧：'
+                      '静止区间两侧取相同值，贝塞尔过渡不过冲')
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -1340,9 +1587,38 @@ class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
-        count = clean_ik_keys(armature)
-        if not count:
-            self.report({'ERROR'}, '当前动作没有可清理的 IK 关键帧')
+        stats = {'removed': 0, 'position': 0.0, 'rotation': 0.0}
+        clean_ik_keys(armature, stats)
+        clean_center_keys(armature, stats)
+        clean_waist_rotation(armature, stats)
+        clean_foot_rotation(armature, stats)
+        clean_ankle_rotation(armature, stats)
+        clean_toe_rotation(armature, stats)
+        clean_toe_tip(armature, stats)
+        clean_lower_body_rotation(armature, stats)
+        self.report({'INFO'},
+                    f'足部减少 {stats["removed"]} 帧，最大位移偏差 '
+                    f'{stats["position"] * 1000.0:.2f} mm，最大旋转偏差 '
+                    f'{math.degrees(stats["rotation"]):.2f}°')
+        return {'FINISHED'}
+
+
+class FLOWHMR2VMD_OT_clean_body_keys(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.clean_body_keys'
+    bl_label = '清理身体关键帧'
+    bl_description = '清理重定向涉及的其它骨骼与手指的冗余旋转关键帧'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        _root, armature = _selected_model(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
-        self.report({'INFO'}, f'已清理 {count} 个 IK 目标骨骼。')
+        stats = {'removed': 0, 'position': 0.0, 'rotation': 0.0}
+        clean_body_rotation(armature, stats)
+        clean_finger_rotation(armature, stats)
+        self.report({'INFO'},
+                    f'身体减少 {stats["removed"]} 帧，最大位移偏差 '
+                    f'{stats["position"] * 1000.0:.2f} mm，最大旋转偏差 '
+                    f'{math.degrees(stats["rotation"]):.2f}°')
         return {'FINISHED'}
