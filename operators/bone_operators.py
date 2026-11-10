@@ -14,7 +14,6 @@ _BONE_PROGRESS = {
 }
 
 
-
 def timeit(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -29,6 +28,7 @@ def timeit(func):
         return result
 
     return wrapper
+
 
 def get_bone_progress():
     return _BONE_PROGRESS
@@ -382,7 +382,7 @@ def _distribute_waist_rotation(action, armature):
             else:
                 base = rest_waist_q.copy()
             shift = base.to_matrix() @ (
-                (q_waist.to_matrix() - Matrix.Identity(3)) @ lower_offset)
+                    (q_waist.to_matrix() - Matrix.Identity(3)) @ lower_offset)
             master_rotation = _world_rotation_at(
                 curves, armature, (_MASTER_BONE,), frame)
             mapping = master_rotation @ (rest_master.inverted() @ rest_center)
@@ -433,9 +433,9 @@ def _move_master_to_center(action, armature):
                                   for index in range(3)])
         master_rotation = _quaternion_at(curves, master_rotation_path, frame)
         center_basis = (
-            Matrix.Translation([_evaluate(curves, center_location_path, index, frame)
-                                for index in range(3)]) @
-            _quaternion_at(curves, center_rotation_path, frame).to_matrix().to_4x4())
+                Matrix.Translation([_evaluate(curves, center_location_path, index, frame)
+                                    for index in range(3)]) @
+                _quaternion_at(curves, center_rotation_path, frame).to_matrix().to_4x4())
         master_basis = (Matrix.Translation(master_location) @
                         master_rotation.to_matrix().to_4x4())
         master_after = master_rotation.to_matrix().to_4x4()
@@ -451,13 +451,13 @@ def _move_master_to_center(action, armature):
             rest_ik = bone.matrix_local.copy()
             rest_parent = parent.matrix_local.copy()
             parent_basis = (
-                Matrix.Translation([_evaluate(curves,
-                                              f'pose.bones["{parent.name}"].location',
-                                              index, frame)
-                                    for index in range(3)]) @
-                _quaternion_at(curves,
-                               f'pose.bones["{parent.name}"].rotation_quaternion',
-                               frame).to_matrix().to_4x4())
+                    Matrix.Translation([_evaluate(curves,
+                                                  f'pose.bones["{parent.name}"].location',
+                                                  index, frame)
+                                        for index in range(3)]) @
+                    _quaternion_at(curves,
+                                   f'pose.bones["{parent.name}"].rotation_quaternion',
+                                   frame).to_matrix().to_4x4())
             ik_basis = Matrix.Translation([
                 _evaluate(curves, f'pose.bones["{name}"].location', index, frame)
                 for index in range(3)])
@@ -520,6 +520,7 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
 
 _TOE_BONES = ('つま先', '足先EX')
 
+
 @timeit
 def convert_toe_rotation(armature, enabled):
     """在 つま先 与 足先EX 之间搬运旋转；返回 (成功, 错误信息)。
@@ -542,6 +543,7 @@ def convert_toe_rotation(armature, enabled):
         _convert_bone_rotation(action, armature, source + side, target + side)
     return True, ''
 
+
 @timeit
 def standardize_channels(armature):
     """按步骤标准化：全亲→センター、全亲复位、腰→上下半身、腰复位、腰キャンセル。"""
@@ -554,6 +556,7 @@ def standardize_channels(armature):
     _reset_waist_pose(armature)
     _compensate_waist_cancel(action, armature)
     return True
+
 
 @timeit
 def _compensate_waist_cancel(action, armature):
@@ -631,95 +634,6 @@ def _reset_waist_pose(armature):
         waist.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
     else:
         waist.rotation_euler = (0.0, 0.0, 0.0)
-
-
-_STANDARDIZE_STEP_ITEMS = (
-    ('MASTER', '全亲到センター', '把 全ての親 的位移移到 センター'),
-    ('RESET_MASTER', '全亲复位', '把 全ての親 的位置复位'),
-    ('WAIST', '腰旋转到上下半身', '把 腰 的旋转增量到 上半身/下半身'),
-    ('RESET_WAIST', '腰旋转复位', '把 腰 的旋转复位'),
-    ('WAIST_CANCEL', '腰キャンセル补偿', '开启 腰キャンセル 并把被取消的旋转补偿到 足'),
-)
-
-
-def _check_standardize_action(operator, context):
-    obj = context.active_object
-    if obj is None or obj not in context.selected_objects:
-        selected = list(context.selected_objects)
-        obj = selected[0] if selected else obj
-    if obj is None:
-        operator.report({'ERROR'}, '请先选中 MMD 模型对象。')
-        return None
-    root, armature = mmd.find_root_and_armature(obj)
-    if armature is None:
-        operator.report({'ERROR'}, '未找到 MMD 骨架。')
-        return None
-    for name in (_CENTER_BONE, _WAIST_BONE, _MASTER_BONE):
-        if armature.data.bones.get(name) is None:
-            operator.report({'ERROR'}, f'骨架缺少 {name} 骨骼。')
-            return None
-    action = armature.animation_data.action if armature.animation_data else None
-    if action is None:
-        operator.report({'ERROR'}, '骨架没有可标准化的动作。')
-        return None
-    return armature, action
-
-
-class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.standardize'
-    bl_label = '标准化'
-    bl_description = ('把 腰 旋转增量到 上半身/下半身，把 全ての親 位移移到 センター，'
-                      '并开启 腰キャンセル')
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def check_props(self, context):
-        return _check_standardize_action(self, context)
-
-    def execute(self, context):
-        checked = self.check_props(context)
-        if checked is None:
-            return {'CANCELLED'}
-        armature, action = checked
-        standardize_channels(armature)
-        context.view_layer.update()
-        self.report({'INFO'}, '已把 腰 旋转增量到 上半身/下半身，位移移到 センター，并开启 腰キャンセル。')
-        return {'FINISHED'}
-
-
-class FLOWHMR2VMD_OT_standardize_step(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.standardize_step'
-    bl_label = '标准化步骤'
-    bl_description = '分步执行标准化过程'
-    bl_options = {'REGISTER', 'UNDO'}
-
-    step: bpy.props.EnumProperty(name='步骤', items=_STANDARDIZE_STEP_ITEMS)
-
-    def check_props(self, context):
-        return _check_standardize_action(self, context)
-
-    def execute(self, context):
-        checked = self.check_props(context)
-        if checked is None:
-            return {'CANCELLED'}
-        armature, action = checked
-        if self.step == 'MASTER':
-            _move_master_to_center(action, armature)
-            message = '已把 全ての親 位移移到 センター。'
-        elif self.step == 'RESET_MASTER':
-            _reset_master_pose(armature)
-            message = '已复位 全ての親。'
-        elif self.step == 'WAIST':
-            _distribute_waist_rotation(action, armature)
-            message = '已把 腰 旋转增量到 上半身/下半身。'
-        elif self.step == 'RESET_WAIST':
-            _reset_waist_pose(armature)
-            message = '已复位 腰。'
-        else:
-            _compensate_waist_cancel(action, armature)
-            message = '已开启 腰キャンセル 并补偿 足。'
-        context.view_layer.update()
-        self.report({'INFO'}, message)
-        return {'FINISHED'}
 
 
 class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
@@ -1077,4 +991,3 @@ class FLOWHMR2VMD_OT_finger_driver(bpy.types.Operator):
                 finger_limits.apply_finger_limits(armature, props)
             mmd.write_state(root, mmd.STATE_FINGER_DRIVER, False)
         return {'FINISHED'}
-
