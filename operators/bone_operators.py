@@ -398,15 +398,14 @@ def _distribute_waist_rotation(action, armature):
     return True
 
 
-def _move_standardize_channels(action, armature):
-    """把 腰 旋转增量到 上半身/下半身，把 全ての親 位移搬到 センター。"""
-    moved = _distribute_waist_rotation(action, armature)
+def _move_master_to_center(action, armature):
+    """把 全ての親 的位移搬到 センター，并补偿 足ＩＫ 的位置。"""
     master_path = f'pose.bones["{_MASTER_BONE}"].location'
     master_rotation_path = f'pose.bones["{_MASTER_BONE}"].rotation_quaternion'
     center_location_path = f'pose.bones["{_CENTER_BONE}"].location'
     center_rotation_path = f'pose.bones["{_CENTER_BONE}"].rotation_quaternion'
     if not _curves(action, master_path):
-        return moved
+        return False
     ik_targets = []
     for side in ('.L', '.R'):
         name = f'足ＩＫ{side}'
@@ -545,12 +544,14 @@ def convert_toe_rotation(armature, enabled):
 
 @timeit
 def standardize_channels(armature):
-    """把 腰 旋转增量到 上半身/下半身，位移搬到 センター，并开启 腰キャンセル。"""
+    """按步骤标准化：全亲→センター、全亲复位、腰→上下半身、腰复位、腰キャンセル。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
-    _move_standardize_channels(action, armature)
-    _reset_transferred_pose(armature)
+    _move_master_to_center(action, armature)
+    _reset_master_pose(armature)
+    _distribute_waist_rotation(action, armature)
+    _reset_waist_pose(armature)
     _compensate_waist_cancel(action, armature)
     return True
 
@@ -614,18 +615,54 @@ def _compensate_waist_cancel(action, armature):
     return True
 
 
-def _reset_transferred_pose(armature):
-    waist = armature.pose.bones.get(_WAIST_BONE)
-    if waist is not None:
-        if waist.rotation_mode == 'QUATERNION':
-            waist.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
-        elif waist.rotation_mode == 'AXIS_ANGLE':
-            waist.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
-        else:
-            waist.rotation_euler = (0.0, 0.0, 0.0)
+def _reset_master_pose(armature):
     master = armature.pose.bones.get(_MASTER_BONE)
     if master is not None:
         master.location = (0.0, 0.0, 0.0)
+
+
+def _reset_waist_pose(armature):
+    waist = armature.pose.bones.get(_WAIST_BONE)
+    if waist is None:
+        return
+    if waist.rotation_mode == 'QUATERNION':
+        waist.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    elif waist.rotation_mode == 'AXIS_ANGLE':
+        waist.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+    else:
+        waist.rotation_euler = (0.0, 0.0, 0.0)
+
+
+_STANDARDIZE_STEP_ITEMS = (
+    ('MASTER', '全亲到センター', '把 全ての親 的位移移到 センター'),
+    ('RESET_MASTER', '全亲复位', '把 全ての親 的位置复位'),
+    ('WAIST', '腰旋转到上下半身', '把 腰 的旋转增量到 上半身/下半身'),
+    ('RESET_WAIST', '腰旋转复位', '把 腰 的旋转复位'),
+    ('WAIST_CANCEL', '腰キャンセル补偿', '开启 腰キャンセル 并把被取消的旋转补偿到 足'),
+)
+
+
+def _check_standardize_action(operator, context):
+    obj = context.active_object
+    if obj is None or obj not in context.selected_objects:
+        selected = list(context.selected_objects)
+        obj = selected[0] if selected else obj
+    if obj is None:
+        operator.report({'ERROR'}, '请先选中 MMD 模型对象。')
+        return None
+    root, armature = mmd.find_root_and_armature(obj)
+    if armature is None:
+        operator.report({'ERROR'}, '未找到 MMD 骨架。')
+        return None
+    for name in (_CENTER_BONE, _WAIST_BONE, _MASTER_BONE):
+        if armature.data.bones.get(name) is None:
+            operator.report({'ERROR'}, f'骨架缺少 {name} 骨骼。')
+            return None
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        operator.report({'ERROR'}, '骨架没有可标准化的动作。')
+        return None
+    return armature, action
 
 
 class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
@@ -636,26 +673,7 @@ class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def check_props(self, context):
-        obj = context.active_object
-        if obj is None or obj not in context.selected_objects:
-            selected = list(context.selected_objects)
-            obj = selected[0] if selected else obj
-        if obj is None:
-            self.report({'ERROR'}, '请先选中 MMD 模型对象。')
-            return None
-        root, armature = mmd.find_root_and_armature(obj)
-        if armature is None:
-            self.report({'ERROR'}, '未找到 MMD 骨架。')
-            return None
-        for name in (_CENTER_BONE, _WAIST_BONE, _MASTER_BONE):
-            if armature.data.bones.get(name) is None:
-                self.report({'ERROR'}, f'骨架缺少 {name} 骨骼。')
-                return None
-        action = armature.animation_data.action if armature.animation_data else None
-        if action is None:
-            self.report({'ERROR'}, '骨架没有可标准化的动作。')
-            return None
-        return armature, action
+        return _check_standardize_action(self, context)
 
     def execute(self, context):
         checked = self.check_props(context)
@@ -665,6 +683,42 @@ class FLOWHMR2VMD_OT_standardize(bpy.types.Operator):
         standardize_channels(armature)
         context.view_layer.update()
         self.report({'INFO'}, '已把 腰 旋转增量到 上半身/下半身，位移移到 センター，并开启 腰キャンセル。')
+        return {'FINISHED'}
+
+
+class FLOWHMR2VMD_OT_standardize_step(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.standardize_step'
+    bl_label = '标准化步骤'
+    bl_description = '分步执行标准化过程'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    step: bpy.props.EnumProperty(name='步骤', items=_STANDARDIZE_STEP_ITEMS)
+
+    def check_props(self, context):
+        return _check_standardize_action(self, context)
+
+    def execute(self, context):
+        checked = self.check_props(context)
+        if checked is None:
+            return {'CANCELLED'}
+        armature, action = checked
+        if self.step == 'MASTER':
+            _move_master_to_center(action, armature)
+            message = '已把 全ての親 位移移到 センター。'
+        elif self.step == 'RESET_MASTER':
+            _reset_master_pose(armature)
+            message = '已复位 全ての親。'
+        elif self.step == 'WAIST':
+            _distribute_waist_rotation(action, armature)
+            message = '已把 腰 旋转增量到 上半身/下半身。'
+        elif self.step == 'RESET_WAIST':
+            _reset_waist_pose(armature)
+            message = '已复位 腰。'
+        else:
+            _compensate_waist_cancel(action, armature)
+            message = '已开启 腰キャンセル 并补偿 足。'
+        context.view_layer.update()
+        self.report({'INFO'}, message)
         return {'FINISHED'}
 
 
