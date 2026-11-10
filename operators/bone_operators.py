@@ -544,9 +544,79 @@ def convert_toe_rotation(armature, enabled):
     return True, ''
 
 
+def fk_to_ik(armature, start, end):
+    """同步执行 FK->IK：转换腿部、写入 IK 关键帧并注册 toggle。"""
+    if not mmd.mmd_tools_enabled():
+        return False
+    for side in ('.L', '.R'):
+        if (armature.pose.bones.get(f'足ＩＫ{side}') is None or
+                armature.pose.bones.get(f'ひざ{side}') is None or
+                armature.pose.bones.get(f'足首{side}') is None):
+            return False
+    source_action = (armature.animation_data.action
+                     if armature.animation_data else None)
+    if source_action is None:
+        return False
+    context = bpy.context
+    original_scene = context.scene
+    bpy.ops.scene.new(type='NEW')
+    tmp_scene = context.scene
+    tmp_scene.frame_start = start
+    tmp_scene.frame_end = end
+    tmp = armature.copy()
+    tmp.data = armature.data.copy()
+    tmp.name = armature.name + '_fkik_tmp'
+    tmp.parent = None
+    tmp.matrix_world = armature.matrix_world.copy()
+    tmp_scene.collection.objects.link(tmp)
+    tmp_animation = tmp.animation_data_create()
+    tmp_action = source_action.copy()
+    tmp_animation.action = tmp_action
+    try:
+        if getattr(tmp_action, 'slots', None):
+            tmp_animation.action_slot = tmp_action.slots[0]
+    except Exception:
+        pass
+    records = {'.L': [], '.R': []}
+    tmp_data = tmp.data
+    try:
+        tmp.select_set(True)
+        context.view_layer.objects.active = tmp
+        _remove_upper_body_children(context, tmp)
+        for frame in range(int(start), int(end) + 1):
+            _convert_frame(tmp, tmp_scene, frame, records)
+    finally:
+        window = getattr(context, 'window', None)
+        if window is not None:
+            window.scene = original_scene
+        bpy.data.objects.remove(tmp, do_unlink=True)
+        bpy.data.armatures.remove(tmp_data)
+        bpy.data.scenes.remove(tmp_scene)
+        bpy.data.actions.remove(tmp_action)
+    _write_back_leg_ik(armature, records)
+    _remove_leg_fcurves(armature)
+    _enable_leg_ik_toggle(armature, start)
+    _set_leg_ik(armature, True)
+    return True
+
+
+def _remove_knee_fcurves(armature):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    removed = False
+    for side in ('.L', '.R'):
+        prefix = f'pose.bones["ひざ{side}"]'
+        for fcurve in [fc for fc in action.fcurves
+                       if fc.data_path.startswith(prefix)]:
+            action.fcurves.remove(fcurve)
+            removed = True
+    return removed
+
+
 @timeit
 def standardize_channels(armature):
-    """按步骤标准化：全亲→センター、全亲复位、腰→上下半身、腰复位、腰キャンセル。"""
+    """按步骤标准化：全亲→センター、全亲复位、腰→上下半身、腰复位、腰キャンセル、FK→IK。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
@@ -555,6 +625,12 @@ def standardize_channels(armature):
     _distribute_waist_rotation(action, armature)
     _reset_waist_pose(armature)
     _compensate_waist_cancel(action, armature)
+    scene = bpy.context.scene
+    start = int(scene.frame_start)
+    end = int(scene.frame_end)
+    if fk_to_ik(armature, start, end):
+        _bake_leg_fk_from_ik(armature, start, end)
+        _remove_knee_fcurves(armature)
     return True
 
 
@@ -634,159 +710,6 @@ def _reset_waist_pose(armature):
         waist.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
     else:
         waist.rotation_euler = (0.0, 0.0, 0.0)
-
-
-class FLOWHMR2VMD_OT_fk_to_ik(bpy.types.Operator):
-    bl_idname = 'flowhmr2vmd.fk_to_ik'
-    bl_label = 'FK->IK'
-    bl_description = '将腿部驱动方式由FK转换为IK，以便后续调整动作。'
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def check_props(self, context):
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件。')
-            return None
-        obj = context.active_object
-        if obj is None or obj not in context.selected_objects:
-            selected = list(context.selected_objects)
-            obj = selected[0] if selected else obj
-        if obj is None:
-            self.report({'ERROR'}, '请先选中 MMD 模型对象。')
-            return None
-        root, armature = mmd.find_root_and_armature(obj)
-        if armature is None:
-            self.report({'ERROR'}, '未找到 MMD 骨架。')
-            return None
-        for side in ('.L', '.R'):
-            if (armature.pose.bones.get(f'足ＩＫ{side}') is None or
-                    armature.pose.bones.get(f'ひざ{side}') is None or
-                    armature.pose.bones.get(f'足首{side}') is None):
-                self.report({'ERROR'}, '骨架缺少 MMD 腿部 IK 骨骼。')
-                return None
-        scene = context.scene
-        return armature, int(scene.frame_start), int(scene.frame_end)
-
-    def execute(self, context):
-        checked = self.check_props(context)
-        if checked is None:
-            return {'CANCELLED'}
-        armature, start, end = checked
-        original_scene = context.scene
-        source_action = (armature.animation_data.action
-                         if armature.animation_data else None)
-
-        bpy.ops.scene.new(type='NEW')
-        tmp_scene = context.scene
-        tmp_scene.frame_start = start
-        tmp_scene.frame_end = end
-        tmp = armature.copy()
-        tmp.data = armature.data.copy()
-        tmp.name = armature.name + '_fkik_tmp'
-        tmp.parent = None
-        tmp.matrix_world = armature.matrix_world.copy()
-        tmp_scene.collection.objects.link(tmp)
-        tmp_animation = tmp.animation_data_create()
-        tmp_action = source_action.copy() if source_action else None
-        if tmp_action is not None:
-            tmp_animation.action = tmp_action
-            try:
-                if getattr(tmp_action, 'slots', None):
-                    tmp_animation.action_slot = tmp_action.slots[0]
-            except Exception:
-                pass
-
-        self._state = dict(
-            context=context,
-            original_scene=original_scene,
-            armature=armature,
-            tmp=tmp,
-            tmp_scene=tmp_scene,
-            tmp_action=tmp_action,
-            start=start,
-            end=end,
-            frame=start,
-            records={'.L': [], '.R': []},
-        )
-        try:
-            tmp.select_set(True)
-            context.view_layer.objects.active = tmp
-            _remove_upper_body_children(context, tmp)
-        except Exception:
-            self._cleanup(return_to_original=True)
-            raise
-
-        total = end - start + 1
-        set_bone_progress(True, 0.0, f'转换中 0%（0/{total} 帧）')
-        if bpy.app.background or context.window is None:
-            for frame in range(start, end + 1):
-                _convert_frame(tmp, tmp_scene, frame, self._state['records'])
-                self._state['frame'] = frame + 1
-            self._finish(context)
-            return {'FINISHED'}
-        self._timer = context.window_manager.event_timer_add(
-            0.05, window=context.window)
-        context.window_manager.modal_handler_add(self)
-        tag_redraw(context)
-        return {'RUNNING_MODAL'}
-
-    def modal(self, context, event):
-        if event.type != 'TIMER':
-            return {'RUNNING_MODAL'}
-        state = self._state
-        total = state['end'] - state['start'] + 1
-        step = max(1, total // 100)
-        for _ in range(step):
-            if state['frame'] > state['end']:
-                break
-            _convert_frame(state['tmp'], state['tmp_scene'],
-                           state['frame'], state['records'])
-            state['frame'] += 1
-        if state['frame'] > state['end']:
-            self._finish(context)
-            return {'FINISHED'}
-        done = state['frame'] - state['start']
-        factor = done / total
-        set_bone_progress(True, factor,
-                          f'转换中 {int(factor * 100)}%（{done}/{total} 帧）')
-        tag_redraw(context)
-        return {'RUNNING_MODAL'}
-
-    def _finish(self, context):
-        state = self._state
-        self._cleanup(return_to_original=True)
-        _write_back_leg_ik(state['armature'], state['records'])
-        _remove_leg_fcurves(state['armature'])
-        _enable_leg_ik_toggle(state['armature'], state['start'])
-        _set_leg_ik(state['armature'], True)
-        _bake_leg_fk_from_ik(state['armature'], state['start'], state['end'])
-        set_bone_progress(False)
-        tag_redraw(context)
-        self.report({'INFO'}, f'已完成 FK->IK')
-
-    def _cleanup(self, return_to_original=True):
-        state = self._state
-        if getattr(self, '_timer', None) is not None:
-            try:
-                state['context'].window_manager.event_timer_remove(self._timer)
-            except Exception:
-                pass
-            self._timer = None
-        if return_to_original and state.get('original_scene') is not None:
-            window = getattr(state['context'], 'window', None)
-            if window is not None:
-                window.scene = state['original_scene']
-        tmp = state.get('tmp')
-        if tmp is not None:
-            tmp_data = tmp.data
-            bpy.data.objects.remove(tmp, do_unlink=True)
-            bpy.data.armatures.remove(tmp_data)
-            state['tmp'] = None
-        if state.get('tmp_scene') is not None:
-            bpy.data.scenes.remove(state['tmp_scene'])
-            state['tmp_scene'] = None
-        if state.get('tmp_action') is not None:
-            bpy.data.actions.remove(state['tmp_action'])
-            state['tmp_action'] = None
 
 
 _FINGER_BASE_NAMES = (

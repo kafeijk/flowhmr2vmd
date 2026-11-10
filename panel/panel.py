@@ -69,7 +69,6 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
         props = scene.flowhmr2vmd_properties
         state = _model_state(context)
         col = layout.column()
-        col.operator('flowhmr2vmd.fk_to_ik', text='FK->IK', icon='ARMATURE_DATA')
         _toggle_row(col, '脚尖旋转', 'flowhmr2vmd.rotate_toe',
                     state[mmd.STATE_ROTATE_TOE])
         progress = get_bone_progress()
