@@ -103,6 +103,30 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         default='DISABLED',
         update=_update_finger_fix,
     )
+    boost_axis: bpy.props.EnumProperty(
+        name='增强轴',
+        description='选择要放大的世界方向，单向选项只放大该方向的波动',
+        items=(('UP', '上', '只放大朝上的位移'),
+               ('DOWN', '下', '只放大朝下的位移'),
+               ('LEFT', '左', '只放大朝左的位移'),
+               ('RIGHT', '右', '只放大朝右的位移'),
+               ('FRONT', '前', '只放大朝前的位移'),
+               ('BACK', '后', '只放大朝后的位移'),
+               ('VERTICAL', '上下', '放大上下两个方向'),
+               ('SIDE', '左右', '放大左右两个方向'),
+               ('FRONTBACK', '前后', '放大前后两个方向'),
+               ('ALL', '全部', '放大三个方向的位移')),
+        default='VERTICAL',
+    )
+    boost_strength: bpy.props.FloatProperty(
+        name='位置缩放',
+        description='位移波动的缩放倍数，1 为不变',
+        default=1.0,
+        min=1.0,
+        max=10.0,
+        step=10,
+        precision=2,
+    )
 
     @staticmethod
     def register():

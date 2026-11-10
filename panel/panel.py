@@ -69,3 +69,12 @@ class FLOWHMR2VMD_PT_tools(bpy.types.Panel):
                      icon='ACTION')
         col.operator('flowhmr2vmd.clean_body_keys', text='清理身体关键帧',
                      icon='BONE_DATA')
+        row = col.row(align=True)
+        split = row.split(factor=0.4, align=True)
+        split.alignment = 'RIGHT'
+        split.label(text='位移增强')
+        right = split.row(align=True)
+        right.prop(props, 'boost_axis', text='')
+        right.prop(props, 'boost_strength', text='')
+        right.operator('flowhmr2vmd.boost_bone_motion', text='',
+                       icon='ARROW_LEFTRIGHT')

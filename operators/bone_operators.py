@@ -1469,45 +1469,80 @@ def _selected_model(context):
 
 
 def adjust_foot_spacing(armature, spacing_m):
-    """足ＩＫ.L 向世界 +X、足ＩＫ.R 向世界 -X 平移 spacing_m 米。"""
+    """左右足ＩＫ 沿下半身当前朝向的左右方向各向外平移 spacing_m 米。"""
     shift = float(spacing_m)
     if abs(shift) < 1e-9:
         return False
+    left_bone = armature.data.bones.get('足ＩＫ.L')
+    right_bone = armature.data.bones.get('足ＩＫ.R')
+    if left_bone is None or right_bone is None:
+        return False
     action = armature.animation_data.action if armature.animation_data else None
+    action_curves = _curve_map(action) if action is not None else {}
+    rest_lateral = left_bone.head_local - right_bone.head_local
+    rest_lateral.z = 0.0
+    if rest_lateral.length < 1e-9:
+        rest_lateral = Vector((1.0, 0.0, 0.0))
+    else:
+        rest_lateral.normalize()
+    lower = armature.data.bones.get('下半身')
+    if lower is not None:
+        local_lateral = lower.matrix_local.to_quaternion().inverted() @ rest_lateral
+    else:
+        local_lateral = None
+    cache = {}
+
+    def lateral_at(frame):
+        if local_lateral is None:
+            lateral = armature.matrix_world.to_quaternion() @ rest_lateral
+        else:
+            lateral = _bone_world_rotation_at(armature, lower, action_curves,
+                                              cache, frame) @ local_lateral
+        lateral.z = 0.0
+        if lateral.length < 1e-9:
+            return Vector((1.0, 0.0, 0.0))
+        return lateral.normalized()
+
     found = False
     for side, sign in (('.L', 1.0), ('.R', -1.0)):
         pose_bone = armature.pose.bones.get(f'足ＩＫ{side}')
         if pose_bone is None:
             continue
         found = True
-        rest_rotation = (armature.matrix_world @
-                         pose_bone.bone.matrix_local).to_quaternion()
-        delta = rest_rotation.inverted() @ Vector((sign * shift, 0.0, 0.0))
+        rest_inverse = (armature.matrix_world @
+                        pose_bone.bone.matrix_local).to_quaternion().inverted()
         path = pose_bone.path_from_id('location')
-        curves = ({fc.array_index: fc for fc in action.fcurves
-                   if fc.data_path == path} if action is not None else {})
-        if not curves:
-            pose_bone.location += delta
+        channel_curves = ({fc.array_index: fc for fc in action.fcurves
+                           if fc.data_path == path}
+                          if action is not None else {})
+        if not channel_curves:
+            frame = bpy.context.scene.frame_current
+            pose_bone.location += rest_inverse @ (
+                lateral_at(frame) * (sign * shift))
             continue
-        frames = sorted({round(point.co.x) for fcurve in curves.values()
+        frames = sorted({round(point.co.x) for fcurve in channel_curves.values()
                          for point in fcurve.keyframe_points})
         if not frames:
-            pose_bone.location += delta
+            frame = bpy.context.scene.frame_current
+            pose_bone.location += rest_inverse @ (
+                lateral_at(frame) * (sign * shift))
             continue
+        deltas = {frame: rest_inverse @ (lateral_at(frame) * (sign * shift))
+                  for frame in frames}
         for index in range(3):
-            fcurve = curves.get(index)
+            fcurve = channel_curves.get(index)
             if fcurve is None:
                 fcurve = action.fcurves.new(path, index=index,
                                             action_group='standardize')
                 fcurve.keyframe_points.add(len(frames))
-                base = pose_bone.location[index] + delta[index]
+                base = pose_bone.location[index]
                 for point, frame in zip(fcurve.keyframe_points, frames):
-                    point.co = (frame, base)
+                    point.co = (frame, base + deltas[frame][index])
                     point.interpolation = 'LINEAR'
                 fcurve.update()
                 continue
-            amount = delta[index]
             for point in fcurve.keyframe_points:
+                amount = deltas[round(point.co.x)][index]
                 point.co.y += amount
                 point.handle_left.y += amount
                 point.handle_right.y += amount
@@ -1518,7 +1553,7 @@ def adjust_foot_spacing(armature, spacing_m):
 class FLOWHMR2VMD_OT_adjust_foot_spacing(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.adjust_foot_spacing'
     bl_label = '调整脚间距'
-    bl_description = '按「脚间距」参数平移左右足ＩＫ：左足向 +X，右足向 -X'
+    bl_description = '按「脚间距」参数沿角色左右方向平移左右足ＩＫ'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -1621,4 +1656,164 @@ class FLOWHMR2VMD_OT_clean_body_keys(bpy.types.Operator):
                     f'身体减少 {stats["removed"]} 帧，最大位移偏差 '
                     f'{stats["position"] * 1000.0:.2f} mm，最大旋转偏差 '
                     f'{math.degrees(stats["rotation"]):.2f}°')
+        return {'FINISHED'}
+
+
+_BOOST_SPECS = {
+    'UP': (Vector((0.0, 0.0, 1.0)), 1.0),
+    'DOWN': (Vector((0.0, 0.0, 1.0)), -1.0),
+    'LEFT': (Vector((1.0, 0.0, 0.0)), 1.0),
+    'RIGHT': (Vector((1.0, 0.0, 0.0)), -1.0),
+    'FRONT': (Vector((0.0, 1.0, 0.0)), -1.0),
+    'BACK': (Vector((0.0, 1.0, 0.0)), 1.0),
+    'VERTICAL': (Vector((0.0, 0.0, 1.0)), 0.0),
+    'SIDE': (Vector((1.0, 0.0, 0.0)), 0.0),
+    'FRONTBACK': (Vector((0.0, 1.0, 0.0)), 0.0),
+    'ALL': (None, 0.0),
+}
+_BOOST_LOCALS = (Vector((1.0, 0.0, 0.0)),
+                 Vector((0.0, 1.0, 0.0)),
+                 Vector((0.0, 0.0, 1.0)))
+
+
+def _boost_point(point, mean, factor, allowed):
+    for attribute in ('co', 'handle_left', 'handle_right'):
+        vector = getattr(point, attribute)
+        deviation = vector.y - mean
+        if allowed == 0.0 or deviation * allowed > 0.0:
+            vector.y = mean + deviation * factor
+            setattr(point, attribute, vector)
+
+
+def _boost_channel_targets(channels, directions, target, side):
+    if target is None:
+        return [(index, 0.0) for index in channels]
+    best_index = max(channels,
+                     key=lambda index: abs(directions[index].dot(target)))
+    if side == 0.0:
+        return [(best_index, 0.0)]
+    alignment = directions[best_index].dot(target)
+    return [(best_index, (1.0 if alignment >= 0.0 else -1.0) * side)]
+
+
+def boost_selected_keyframes(armature, axis, factor, margin):
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    active = armature.data.bones.active
+    if active is None:
+        return 0
+    pose_bone = armature.pose.bones.get(active.name)
+    if pose_bone is None:
+        return 0
+    if not (getattr(pose_bone, 'select', False) or pose_bone.bone.select):
+        return 0
+    target, side = _BOOST_SPECS[axis]
+    path = f'pose.bones["{pose_bone.name}"].location'
+    channels = {fc.array_index: fc for fc in action.fcurves
+                if fc.data_path == path}
+    if not channels:
+        return 0
+    selected_frames = set()
+    for fcurve in channels.values():
+        selected_frames.update(
+            round(point.co.x) for point in fcurve.keyframe_points
+            if point.select_control_point)
+    if not selected_frames:
+        return 0
+    rest = (armature.matrix_world @ pose_bone.bone.matrix_local).to_quaternion()
+    directions = [(rest @ local).normalized() for local in _BOOST_LOCALS]
+    boosted = set()
+    touched = False
+    for index, allowed in _boost_channel_targets(channels, directions,
+                                                 target, side):
+        fcurve = channels.get(index)
+        if fcurve is None:
+            continue
+        points = fcurve.keyframe_points
+        selected_indices = [index for index, point in enumerate(points)
+                            if round(point.co.x) in selected_frames]
+        if not selected_indices:
+            continue
+        runs = []
+        run_start = selected_indices[0]
+        previous = run_start
+        for index in selected_indices[1:]:
+            if index == previous + 1:
+                previous = index
+                continue
+            runs.append((run_start, previous))
+            run_start = previous = index
+        runs.append((run_start, previous))
+        fallback = sum(point.co.y for point in points) / len(points)
+        for run_start, run_end in runs:
+            if run_end > run_start:
+                # 基准 = 选中段内所有关键帧值的算术平均（总和 ÷ 数量）；单帧时取左右相邻帧均值
+                baseline = sum(points[index].co.y
+                               for index in range(run_start, run_end + 1)) / (
+                                   run_end - run_start + 1)
+            else:
+                left = points[run_start - 1].co.y if run_start > 0 else None
+                right = (points[run_end + 1].co.y
+                         if run_end + 1 < len(points) else None)
+                if left is None and right is None:
+                    baseline = fallback
+                elif left is None:
+                    baseline = right
+                elif right is None:
+                    baseline = left
+                else:
+                    baseline = (left + right) * 0.5
+            for index in range(run_start, run_end + 1):
+                _boost_point(points[index], baseline, factor, allowed)
+                boosted.add(round(points[index].co.x))
+        fcurve.update()
+        touched = True
+    if not touched:
+        return 0
+    for fcurve in channels.values():
+        if margin > 0 and boosted:
+            points = fcurve.keyframe_points
+            for index in range(len(points) - 1, -1, -1):
+                frame = round(points[index].co.x)
+                if frame in boosted:
+                    continue
+                if any(abs(frame - boosted_frame) <= margin
+                       for boosted_frame in boosted):
+                    points.remove(points[index])
+        _set_straight_bezier(fcurve)
+    return 1
+
+
+class FLOWHMR2VMD_OT_boost_bone_motion(bpy.types.Operator):
+    bl_idname = 'flowhmr2vmd.boost_bone_motion'
+    bl_label = '增强选中关键帧'
+    bl_description = ('放大选中位移关键帧的波动，删除其周围指定帧数内的'
+                      '其它关键帧，结果使用贝塞尔插值')
+    bl_options = {'REGISTER', 'UNDO'}
+
+    margin: bpy.props.IntProperty(
+        name='周围帧数',
+        description='删除选中关键帧周围该帧数内的其它关键帧',
+        default=3,
+        min=0,
+        max=50,
+    )
+
+    def execute(self, context):
+        _root, armature = _selected_model(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型')
+            return {'CANCELLED'}
+        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
+        if props is None:
+            return {'CANCELLED'}
+        count = boost_selected_keyframes(armature, props.boost_axis,
+                                         float(props.boost_strength),
+                                         int(self.margin))
+        if not count:
+            self.report({'ERROR'},
+                        '请激活并选中要增强的骨骼，并选择其位移关键帧')
+            return {'CANCELLED'}
+        context.view_layer.update()
         return {'FINISHED'}
