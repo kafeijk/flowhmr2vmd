@@ -276,9 +276,9 @@ def _quaternion_at(curves, path, frame):
     return Quaternion(values).normalized()
 
 
-def _sample_column(curves, path, frames, default=0.0):
+def _sample_column(curves, path, frames, index=0, default=0.0):
     """批量取单条曲线在给定帧上的值：关键帧查表，缺失的帧回退求值。"""
-    fcurve = curves.get((path, 0))
+    fcurve = curves.get((path, index))
     if fcurve is None:
         return [default] * len(frames)
     points = fcurve.keyframe_points
@@ -291,7 +291,8 @@ def _sample_column(curves, path, frames, default=0.0):
 
 def _sample_columns(curves, path, frames):
     """批量取 path 四个通道在给定帧上的值，帧缺失时回退求值。"""
-    return [_sample_column(curves, path, frames, 1.0 if index == 0 else 0.0)
+    return [_sample_column(curves, path, frames, index,
+                           1.0 if index == 0 else 0.0)
             for index in range(4)]
 
 
@@ -700,7 +701,7 @@ def restore_ex_from_ex_custom(armature):
         curves = _curve_map(action)
         columns = [
             _sample_column(curves, path, frames,
-                           1.0 if component == 'w' else 0.0)
+                           default=1.0 if component == 'w' else 0.0)
             for component, path in zip(_EX_CUSTOM_PROPS, paths)
         ]
         styles = _key_styles(curves.get((paths[0], 0)))
@@ -1110,12 +1111,8 @@ def _backup_finger_rotation(action, armature, name):
         return False
     curves = _curve_map(action)
     pose_bone = armature.pose.bones[name]
-    for index, component in enumerate(_FINGER_BACKUP_PROPS):
-        values = [
-            _evaluate(curves, path, index, frame,
-                      1.0 if index == 0 else 0.0)
-            for frame in frames
-        ]
+    columns = _sample_columns(curves, path, frames)
+    for component, values in zip(_FINGER_BACKUP_PROPS, columns):
         _write_custom_property_curve(
             pose_bone, _FINGER_BACKUP_PREFIX + component, frames, values)
     return True
@@ -1133,9 +1130,8 @@ def _restore_finger_rotation(action, armature, name):
         return False
     curves = _curve_map(action)
     columns = [
-        [_evaluate(curves, path, 0, frame,
-                   1.0 if component == 'w' else 0.0)
-         for frame in frames]
+        _sample_column(curves, path, frames,
+                       default=1.0 if component == 'w' else 0.0)
         for component, path in zip(_FINGER_BACKUP_PROPS, backup_paths)
     ]
     _write_curves(action,

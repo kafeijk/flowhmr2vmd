@@ -217,7 +217,7 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
         # 重定向后执行标准化
         standardize_channels(armature)
 
-        # 若脚尖旋转等可选项被勾选，则重定向后默认执行一次
+        # 若脚尖旋转被勾选，则重定向后默认执行一次
         toe_enabled = props.toe_rotation == 'ENABLED'
         if has_toe:
             if toe_enabled:
@@ -228,6 +228,7 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             store_ex_to_ex_custom(armature)
             if toe_enabled:
                 restore_ex_from_ex_custom(armature)
+        # 若手指修复被勾选，则重定向后默认执行一次
         if props.finger_fix == 'ENABLED':
             apply_finger_fix(armature)
 
