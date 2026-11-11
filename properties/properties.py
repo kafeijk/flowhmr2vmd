@@ -80,15 +80,8 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         description='FlowHMR输出的动作所在目录',
         subtype='DIR_PATH',
     )
-    toe_rotation: bpy.props.EnumProperty(
-        name='脚尖旋转',
-        description='开启后把脚尖旋转写入 足先EX；关闭时清空 足先EX 骨骼关键帧',
-        items=_TOE_ROTATION_ITEMS,
-        default='DISABLED',
-        update=_update_toe_rotation,
-    )
     foot_spacing: bpy.props.FloatProperty(
-        name='脚间距',
+        name='单侧脚间距',
         description='调整足ＩＫ时左右各偏移的米数（左向 +X，右向 -X）',
         default=0.0,
         min=-1.0,
@@ -96,12 +89,28 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         step=10,
         precision=2,
     )
+    toe_rotation: bpy.props.EnumProperty(
+        name='脚尖旋转',
+        description='开启后把脚尖旋转写入 足先EX；关闭时清空 足先EX 骨骼关键帧',
+        items=_TOE_ROTATION_ITEMS,
+        default='DISABLED',
+        update=_update_toe_rotation,
+    )
     finger_fix: bpy.props.EnumProperty(
         name='手指修复',
         description='开启后清除手指末端多余旋转并补偿第一指节；关闭时恢复修复前',
         items=_FINGER_FIX_ITEMS,
         default='ENABLED',
         update=_update_finger_fix,
+    )
+    boost_strength: bpy.props.FloatProperty(
+        name='位置缩放',
+        description='位移波动的缩放倍数，1 为不变',
+        default=1.0,
+        min=1.0,
+        max=10.0,
+        step=10,
+        precision=2,
     )
     boost_axis: bpy.props.EnumProperty(
         name='增强轴',
@@ -117,15 +126,6 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
                ('FRONTBACK', '前后', '放大前后两个方向'),
                ('ALL', '全部', '放大三个方向的位移')),
         default='VERTICAL',
-    )
-    boost_strength: bpy.props.FloatProperty(
-        name='位置缩放',
-        description='位移波动的缩放倍数，1 为不变',
-        default=1.0,
-        min=1.0,
-        max=10.0,
-        step=10,
-        precision=2,
     )
 
     @staticmethod
