@@ -10,15 +10,6 @@
 - MMD Tools 插件。
 - 含 numpy + scipy + torch 的 Python 3 环境（通常位于动补软件文件夹中）。
 
-## 安装
-
-- **脚手架开发**：在 PyCharm 中运行 `test.py`（运行配置 `test`），框架会自动打包、
-  安装到 Blender 的 addons 目录并启动 Blender。
-- **独立安装**：使用脚手架的 `release.py` 生成发布 zip（发布包会包含
-  `common` 自动加载模块），再在 Blender → **Preferences > Add-ons >
-  Install from disk** 选择该 zip。不要只压缩插件文件夹，否则缺少 `common`。
-- 无论哪种方式，都需要启用 **MMD Tools**。
-
 ## 许可
 
 MIT License。部分算法与常量改编自
