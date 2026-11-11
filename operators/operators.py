@@ -62,7 +62,7 @@ def _reset_to_rest(root, armature):
 
 class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.retarget_smplh'
-    bl_label = '执行 VMD 重定向'
+    bl_label = '执行'
     bl_description = '将FlowHMR生成的动作数据转换为VMD格式，并将关键帧注册到当前选中模型的骨骼上'
     bl_options = {'REGISTER', 'UNDO'}
 
