@@ -1553,7 +1553,7 @@ def adjust_foot_spacing(armature, spacing_m):
 class FLOWHMR2VMD_OT_adjust_foot_spacing(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.adjust_foot_spacing'
     bl_label = '调整脚间距'
-    bl_description = '按「脚间距」参数沿角色左右方向平移左右足ＩＫ'
+    bl_description = '通过移动IK骨骼调整角色的脚间距。\n当双腿过于靠近、并拢或发生交叉穿模时，可使用本功能进行调整。'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -1578,7 +1578,7 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
     """UI 按钮：只写入枚举属性，实际逻辑由 toe_rotation 的 update 回调处理。"""
     bl_idname = 'flowhmr2vmd.set_toe_rotation'
     bl_label = '脚尖旋转'
-    bl_description = '设置脚尖旋转开关\n注：虽然动捕数据中包含脚尖旋转的关键帧，但MMD通常不会为脚尖骨骼注册关键帧'
+    bl_description = '设置脚尖旋转的开启与关闭\n注：虽然动捕数据中包含脚尖旋转的关键帧，但MMD通常不会为脚尖骨骼注册关键帧'
     bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
@@ -1596,7 +1596,7 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
     """UI 按钮：只写入枚举属性，实际逻辑由 finger_fix 的 update 回调处理。"""
     bl_idname = 'flowhmr2vmd.set_finger_fix'
     bl_label = '手指修复'
-    bl_description = '设置手指修复开关'
+    bl_description = '设置手指修复的开启与关闭'
     bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
@@ -1612,9 +1612,8 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
 
 class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.clean_ik_keys'
-    bl_label = '清理足部关键帧'
-    bl_description = ('清理 センター、足ＩＫ/つま先ＩＫ、腰/足/足首 的冗余关键帧：'
-                      '静止区间两侧取相同值，贝塞尔过渡不过冲')
+    bl_label = '清理腿部关键帧'
+    bl_description = '清理腿部运动相关的冗余关键帧，以减轻腿部抖动，并减小导出后VMD文件的体积。'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -1641,7 +1640,7 @@ class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
 class FLOWHMR2VMD_OT_clean_body_keys(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.clean_body_keys'
     bl_label = '清理身体关键帧'
-    bl_description = '清理重定向涉及的其它骨骼与手指的冗余旋转关键帧'
+    bl_description = '清理腿部以外身体运动相关的冗余关键帧，以减轻身体抖动，并减小导出后VMD文件的体积。'
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -1787,9 +1786,8 @@ def boost_selected_keyframes(armature, axis, factor, margin):
 
 class FLOWHMR2VMD_OT_boost_bone_motion(bpy.types.Operator):
     bl_idname = 'flowhmr2vmd.boost_bone_motion'
-    bl_label = '增强选中关键帧'
-    bl_description = ('放大选中位移关键帧的波动，删除其周围指定帧数内的'
-                      '其它关键帧，结果使用贝塞尔插值')
+    bl_label = '位移增强'
+    bl_description = '增强指定骨骼在指定方向上的位移幅度，使运动变化更加明显。\n使用前需选中目标骨骼，并在时间轴中框选需要处理的关键帧范围。'
     bl_options = {'REGISTER', 'UNDO'}
 
     margin: bpy.props.IntProperty(

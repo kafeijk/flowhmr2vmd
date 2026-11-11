@@ -82,7 +82,7 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     )
     foot_spacing: bpy.props.FloatProperty(
         name='单侧脚间距',
-        description='调整足ＩＫ时左右各偏移的米数（左向 +X，右向 -X）',
+        description='脚间距的一半',
         default=0.0,
         min=-1.0,
         max=1.0,
@@ -104,8 +104,8 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         update=_update_finger_fix,
     )
     boost_strength: bpy.props.FloatProperty(
-        name='位置缩放',
-        description='位移波动的缩放倍数，1 为不变',
+        name='位移增强倍数',
+        description='位移增强的倍数',
         default=1.0,
         min=1.0,
         max=10.0,
@@ -114,17 +114,17 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     )
     boost_axis: bpy.props.EnumProperty(
         name='增强轴',
-        description='选择要放大的世界方向，单向选项只放大该方向的波动',
-        items=(('UP', '上', '只放大朝上的位移'),
-               ('DOWN', '下', '只放大朝下的位移'),
-               ('LEFT', '左', '只放大朝左的位移'),
-               ('RIGHT', '右', '只放大朝右的位移'),
-               ('FRONT', '前', '只放大朝前的位移'),
-               ('BACK', '后', '只放大朝后的位移'),
-               ('VERTICAL', '上下', '放大上下两个方向'),
-               ('SIDE', '左右', '放大左右两个方向'),
-               ('FRONTBACK', '前后', '放大前后两个方向'),
-               ('ALL', '全部', '放大三个方向的位移')),
+        description='位移增强的方向',
+        items=(('UP', '上', '增强向上的位移'),
+               ('DOWN', '下', '增强向下的位移'),
+               ('LEFT', '左', '增强向左的位移'),
+               ('RIGHT', '右', '增强向右的位移'),
+               ('FRONT', '前', '增强向前的位移'),
+               ('BACK', '后', '增强向后的位移'),
+               ('VERTICAL', '上下', '增强上下方向的位移'),
+               ('SIDE', '左右', '增强左右方向的位移'),
+               ('FRONTBACK', '前后', '增强前后方向的位移'),
+               ('ALL', '全部', '增强上下、左右、前后方向的位移')),
         default='VERTICAL',
     )
 
