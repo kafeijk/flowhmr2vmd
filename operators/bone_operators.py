@@ -4,6 +4,7 @@ import math
 import time
 
 import bpy
+import numpy as np
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 from ..core import mmd
@@ -275,6 +276,24 @@ def _quaternion_at(curves, path, frame):
     return Quaternion(values).normalized()
 
 
+def _sample_columns(curves, path, frames):
+    """批量取 path 四个通道在给定帧上的值，帧缺失时回退求值。"""
+    columns = []
+    for index in range(4):
+        fcurve = curves.get((path, index))
+        default = 1.0 if index == 0 else 0.0
+        if fcurve is None:
+            columns.append([default] * len(frames))
+            continue
+        points = fcurve.keyframe_points
+        co = np.empty(len(points) * 2, np.float64)
+        points.foreach_get('co', co)
+        table = dict(zip(co[0::2].tolist(), co[1::2].tolist()))
+        columns.append([table[frame] if frame in table else fcurve.evaluate(frame)
+                        for frame in frames])
+    return columns
+
+
 def _remove_curves(action, path):
     for fcurve in _curves(action, path):
         action.fcurves.remove(fcurve)
@@ -282,14 +301,17 @@ def _remove_curves(action, path):
 
 def _write_curves(action, path, frames, columns, group='standardize'):
     _remove_curves(action, path)
+    count = len(frames)
+    co = np.empty((count, 2), np.float64)
+    # 将frames中的所有帧数，批量赋值给二维数组co的第0列
+    co[:, 0] = frames
+    linear = [1] * count
     for index, values in enumerate(columns):
         fcurve = action.fcurves.new(path, index=index, action_group=group)
-        fcurve.keyframe_points.add(len(frames))
-        points = fcurve.keyframe_points
-        for i, frame in enumerate(frames):
-            point = points[i]
-            point.co = (frame, float(values[i]))
-            point.interpolation = 'LINEAR'
+        fcurve.keyframe_points.add(count)
+        co[:, 1] = values
+        fcurve.keyframe_points.foreach_set('co', co.ravel())
+        fcurve.keyframe_points.foreach_set('interpolation', linear)
         fcurve.update()
 
 
@@ -502,12 +524,11 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
     # 获取源骨骼动画曲线及所有关键帧时间。
     curves = _curve_map(action)
     frames = sorted(_key_times(action, source_path))
-    quaternions = []
-
-    # 逐帧求值源骨骼旋转，并转换到目标骨骼的局部坐标系。
-    for frame in frames:
-        q_source = _quaternion_at(curves, source_path, frame)
-        quaternions.append((left @ q_source @ right).normalized())
+    # 批量读取源骨骼四元数通道，并转换到目标骨骼的局部坐标系。
+    columns = _sample_columns(curves, source_path, frames)
+    quaternions = [(left @ Quaternion([column[i] for column in columns])
+                    .normalized() @ right).normalized()
+                   for i in range(len(frames))]
 
     if not quaternions:
         return False
