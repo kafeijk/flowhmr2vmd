@@ -100,7 +100,7 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         name='手指修复',
         description='开启后清除手指末端多余旋转并补偿第一指节；关闭时恢复修复前',
         items=_FINGER_FIX_ITEMS,
-        default='DISABLED',
+        default='ENABLED',
         update=_update_finger_fix,
     )
     boost_axis: bpy.props.EnumProperty(
