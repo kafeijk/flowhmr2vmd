@@ -1093,87 +1093,6 @@ def fix_fingers(armature):
     return fixed
 
 
-_FINGER_BACKUP_PROPS = ('w', 'x', 'y', 'z')
-_FINGER_BACKUP_PREFIX = 'flowhmr_finger_q'
-
-
-def _finger_backup_path(bone_name, component):
-    return f'pose.bones["{bone_name}"]["{_FINGER_BACKUP_PREFIX}{component}"]'
-
-
-def _backup_finger_rotation(action, armature, name):
-    """把骨骼旋转曲线备份到自定义属性；没有曲线的骨骼直接跳过。"""
-    path = f'pose.bones["{name}"].rotation_quaternion'
-    if not _curves(action, path):
-        return False
-    frames = sorted(_key_times(action, path))
-    if not frames:
-        return False
-    curves = _curve_map(action)
-    pose_bone = armature.pose.bones[name]
-    columns = _sample_columns(curves, path, frames)
-    for component, values in zip(_FINGER_BACKUP_PROPS, columns):
-        _write_custom_property_curve(
-            pose_bone, _FINGER_BACKUP_PREFIX + component, frames, values)
-    return True
-
-
-def _restore_finger_rotation(action, armature, name):
-    """用自定义属性备份恢复骨骼旋转并删除备份曲线。"""
-    backup_paths = [_finger_backup_path(name, component)
-                    for component in _FINGER_BACKUP_PROPS]
-    if not all(_curves(action, path) for path in backup_paths):
-        return False
-    frames = sorted(set().union(*(_key_times(action, path)
-                                  for path in backup_paths)))
-    if not frames:
-        return False
-    curves = _curve_map(action)
-    columns = [
-        _sample_column(curves, path, frames,
-                       default=1.0 if component == 'w' else 0.0)
-        for component, path in zip(_FINGER_BACKUP_PROPS, backup_paths)
-    ]
-    _write_curves(action,
-                  f'pose.bones["{name}"].rotation_quaternion',
-                  frames, columns, group='finger_fix')
-    for path in backup_paths:
-        _remove_curves(action, path)
-    return True
-
-
-def apply_finger_fix(armature):
-    """备份原始旋转后执行手指修复；缺少的骨骼直接跳过。"""
-    action = armature.animation_data.action if armature.animation_data else None
-    if action is None:
-        return 0
-    for side in ('.L', '.R'):
-        for chain in _FINGER_CHAINS:
-            for base in chain[:3]:
-                name = base + side
-                if armature.pose.bones.get(name) is None:
-                    continue
-                _backup_finger_rotation(action, armature, name)
-    return fix_fingers(armature)
-
-
-def revert_finger_fix(armature):
-    """用备份把两侧手指旋转恢复到修复前，返回恢复的骨骼数量。"""
-    action = armature.animation_data.action if armature.animation_data else None
-    if action is None:
-        return 0
-    restored = 0
-    for side in ('.L', '.R'):
-        for chain in _FINGER_CHAINS:
-            for base in chain[:3]:
-                name = base + side
-                if armature.pose.bones.get(name) is None:
-                    continue
-                if _restore_finger_rotation(action, armature, name):
-                    restored += 1
-    return restored
-
-
 _IK_TARGET_BONES = ('足ＩＫ', 'つま先ＩＫ')
 _IK_POSITION_TOLERANCE = 0.005
 _IK_ROTATION_TOLERANCE = math.radians(0.5)
@@ -1689,21 +1608,23 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
-    """UI 按钮：只写入枚举属性，实际逻辑由 finger_fix 的 update 回调处理。"""
-    bl_idname = 'flowhmr2vmd.set_finger_fix'
+class FLOWHMR2VMD_OT_fix_fingers(bpy.types.Operator):
+    """UI 按钮：对手指执行一次修复，不备份数据。"""
+    bl_idname = 'flowhmr2vmd.fix_fingers'
     bl_label = '手指修复'
-    bl_description = '设置手指修复的开启与关闭'
-    bl_options = {'INTERNAL'}
-
-    mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
-                                 default='DISABLED')
+    bl_description = '修复手指骨骼的异常旋转'
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
+        _root, armature = _selected_model(context)
+        if armature is None:
+            self.report({'ERROR'}, '请选择 MMD 模型！')
             return {'CANCELLED'}
-        props.finger_fix = self.mode
+        fixed = fix_fingers(armature)
+        if not fixed:
+            self.report({'WARNING'}, '没有可修复的手指关键帧！')
+            return {'CANCELLED'}
+        self.report({'INFO'}, f'手指修复完成。')
         return {'FINISHED'}
 
 

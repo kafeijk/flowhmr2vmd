@@ -56,24 +56,6 @@ def _update_toe_rotation(self, context):
     _show_toe_error(context, message)
 
 
-_FINGER_FIX_ITEMS = (
-    ('ENABLED', '开启', '开启后清除手指末端多余旋转并补偿第一指节'),
-    ('DISABLED', '关闭', '关闭后把手指旋转恢复到修复前'),
-)
-
-
-def _update_finger_fix(self, context):
-    armature = _active_armature(context)
-    if armature is None:
-        return
-    from ..operators.bone_operators import (apply_finger_fix,
-                                            revert_finger_fix)
-    if self.finger_fix == 'ENABLED':
-        apply_finger_fix(armature)
-    else:
-        revert_finger_fix(armature)
-
-
 class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
         name='动作目录',
@@ -95,13 +77,6 @@ class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
         items=_TOE_ROTATION_ITEMS,
         default='DISABLED',
         update=_update_toe_rotation,
-    )
-    finger_fix: bpy.props.EnumProperty(
-        name='手指修复',
-        description='开启后清除手指末端多余旋转并补偿第一指节；关闭时恢复修复前',
-        items=_FINGER_FIX_ITEMS,
-        default='ENABLED',
-        update=_update_finger_fix,
     )
     boost_strength: bpy.props.FloatProperty(
         name='位移增强倍数',

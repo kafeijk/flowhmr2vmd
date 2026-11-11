@@ -6,7 +6,7 @@ from addons.flowhmr2vmd.operators.bone_operators import (
     FLOWHMR2VMD_OT_boost_bone_motion,
     FLOWHMR2VMD_OT_clean_body_keys,
     FLOWHMR2VMD_OT_clean_ik_keys,
-    FLOWHMR2VMD_OT_set_finger_fix,
+    FLOWHMR2VMD_OT_fix_fingers,
     FLOWHMR2VMD_OT_set_toe_rotation,
 )
 from addons.flowhmr2vmd.operators.operators import FLOWHMR2VMD_OT_retarget_smplh
@@ -75,7 +75,8 @@ class FLOWHMR2VMD_PT_postprocess(bpy.types.Panel):
         right.operator(FLOWHMR2VMD_OT_adjust_foot_spacing.bl_idname, text='', icon='ARROW_LEFTRIGHT')
 
         _toggle_row(col, FLOWHMR2VMD_OT_set_toe_rotation, props.toe_rotation == 'ENABLED')
-        _toggle_row(col, FLOWHMR2VMD_OT_set_finger_fix, props.finger_fix == 'ENABLED')
+        col.operator(FLOWHMR2VMD_OT_fix_fingers.bl_idname,
+                     text=FLOWHMR2VMD_OT_fix_fingers.bl_label, icon='HAND')
 
         col.operator(FLOWHMR2VMD_OT_clean_ik_keys.bl_idname, text=FLOWHMR2VMD_OT_clean_ik_keys.bl_label, icon='ACTION')
         col.operator(FLOWHMR2VMD_OT_clean_body_keys.bl_idname, text=FLOWHMR2VMD_OT_clean_body_keys.bl_label,

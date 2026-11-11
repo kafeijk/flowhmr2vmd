@@ -6,7 +6,7 @@ from pathlib import Path
 import bpy
 import numpy as np
 
-from .bone_operators import (apply_finger_fix, clear_ex_bone_curves,
+from .bone_operators import (clear_ex_bone_curves,
                              convert_toe_rotation, restore_ex_from_ex_custom,
                              standardize_channels, store_ex_to_ex_custom)
 from ..core import bake, geometry, mmd, smplh, solver_client
@@ -228,9 +228,6 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             store_ex_to_ex_custom(armature)
             if toe_enabled:
                 restore_ex_from_ex_custom(armature)
-        # 若手指修复被勾选，则重定向后默认执行一次
-        if props.finger_fix == 'ENABLED':
-            apply_finger_fix(armature)
 
         text = f"已完成重定向，共 {result['frames']} 帧。"
         if not has_upper1:
