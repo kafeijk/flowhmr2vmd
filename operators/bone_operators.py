@@ -1842,6 +1842,10 @@ class FLOWHMR2VMD_OT_clean_body_keys(bpy.types.Operator):
             return {'CANCELLED'}
         props = context.scene.flowhmr2vmd_properties
         # 手指修复未改动过：先还原原始手指动作，清理后再基于清理结果重新修复
+        # 脚尖旋转不需要这样处理：开关只是把关键帧原样（无损）搬运
+        # - 有つま先 + 开启：曲线在 足先EX 上，清理`clean_ex_rotation` 直接清理它；之后关闭时把清理后的曲线搬回 つま先，一致。
+        # - 有つま先 + 关闭：曲线在 つま先 上，清理`clean_toe_rotation` 直接清理；之后开启再搬运，一致。
+        # - 无つま先（自定义属性）：`_clean_ex_side` 会同时清理 足先EX 骨骼曲线和`flowhmr_ex_q*` 属性曲线，开启/关闭两侧始终同步。
         refix = False
         if props.finger_fix == 'ENABLED':
             if not finger_fix_modified(armature):
