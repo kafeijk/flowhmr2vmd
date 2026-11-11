@@ -1705,9 +1705,7 @@ class FLOWHMR2VMD_OT_adjust_foot_spacing(bpy.types.Operator):
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            return {'CANCELLED'}
+        props = context.scene.flowhmr2vmd_properties
         spacing = float(props.foot_spacing)
         if abs(spacing) < 1e-9:
             return {'FINISHED'}
@@ -1729,9 +1727,7 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
                                  default='DISABLED')
 
     def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            return {'CANCELLED'}
+        props = context.scene.flowhmr2vmd_properties
         props.toe_rotation = self.mode
         return {'FINISHED'}
 
@@ -1757,9 +1753,7 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            return {'CANCELLED'}
+        props = context.scene.flowhmr2vmd_properties
         props.finger_fix = self.mode
         return {'FINISHED'}
 
@@ -1802,9 +1796,17 @@ class FLOWHMR2VMD_OT_clean_body_keys(bpy.types.Operator):
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
+        props = context.scene.flowhmr2vmd_properties
+        # 手指修复未改动过：先还原原始手指动作，清理后再基于清理结果重新修复
+        refix = False
+        if props.finger_fix == 'ENABLED':
+            if not finger_fix_modified(armature):
+                refix = revert_finger_fix(armature) > 0
         stats = {'removed': 0, 'position': 0.0, 'rotation': 0.0}
         clean_body_rotation(armature, stats)
         clean_finger_rotation(armature, stats)
+        if refix:
+            apply_finger_fix(armature)
         self.report({'INFO'},
                     f'身体减少 {stats["removed"]} 帧，最大位移偏差 '
                     f'{stats["position"] * 1000.0:.2f} mm，最大旋转偏差 '
@@ -1957,9 +1959,7 @@ class FLOWHMR2VMD_OT_boost_bone_motion(bpy.types.Operator):
         if armature is None:
             self.report({'ERROR'}, '请选择 MMD 模型')
             return {'CANCELLED'}
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        if props is None:
-            return {'CANCELLED'}
+        props = context.scene.flowhmr2vmd_properties
         count = boost_selected_keyframes(armature, props.boost_axis,
                                          float(props.boost_strength),
                                          int(self.margin))
