@@ -276,22 +276,23 @@ def _quaternion_at(curves, path, frame):
     return Quaternion(values).normalized()
 
 
+def _sample_column(curves, path, frames, default=0.0):
+    """批量取单条曲线在给定帧上的值：关键帧查表，缺失的帧回退求值。"""
+    fcurve = curves.get((path, 0))
+    if fcurve is None:
+        return [default] * len(frames)
+    points = fcurve.keyframe_points
+    co = np.empty(len(points) * 2, np.float64)
+    points.foreach_get('co', co)
+    table = dict(zip(co[0::2].tolist(), co[1::2].tolist()))
+    return [table[frame] if frame in table else fcurve.evaluate(frame)
+            for frame in frames]
+
+
 def _sample_columns(curves, path, frames):
     """批量取 path 四个通道在给定帧上的值，帧缺失时回退求值。"""
-    columns = []
-    for index in range(4):
-        fcurve = curves.get((path, index))
-        default = 1.0 if index == 0 else 0.0
-        if fcurve is None:
-            columns.append([default] * len(frames))
-            continue
-        points = fcurve.keyframe_points
-        co = np.empty(len(points) * 2, np.float64)
-        points.foreach_get('co', co)
-        table = dict(zip(co[0::2].tolist(), co[1::2].tolist()))
-        columns.append([table[frame] if frame in table else fcurve.evaluate(frame)
-                        for frame in frames])
-    return columns
+    return [_sample_column(curves, path, frames, 1.0 if index == 0 else 0.0)
+            for index in range(4)]
 
 
 def _remove_curves(action, path):
@@ -703,9 +704,8 @@ def restore_ex_from_ex_custom(armature):
             continue
         curves = _curve_map(action)
         columns = [
-            [_evaluate(curves, path, 0, frame,
-                       1.0 if component == 'w' else 0.0)
-             for frame in frames]
+            _sample_column(curves, path, frames,
+                           1.0 if component == 'w' else 0.0)
             for component, path in zip(_EX_CUSTOM_PROPS, paths)
         ]
         styles = _key_styles(curves.get((paths[0], 0)))
