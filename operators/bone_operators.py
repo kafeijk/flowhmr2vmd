@@ -1,5 +1,6 @@
 """Bone-level operators: standardize channels and FK to MMD IK conversion."""
 import functools
+import hashlib
 import math
 import time
 
@@ -1142,19 +1143,67 @@ def _restore_finger_rotation(action, armature, name):
     return True
 
 
-def apply_finger_fix(armature):
-    """备份原始旋转后执行手指修复；缺少的骨骼直接跳过。"""
-    action = armature.animation_data.action if armature.animation_data else None
-    if action is None:
-        return 0
+_FINGER_FIX_HASH = 'flowhmr_finger_fix_hash'
+
+
+def _finger_signature(action, name):
+    """计算骨骼旋转曲线的指纹，用于判断修复后是否被手动改过。"""
+    path = f'pose.bones["{name}"].rotation_quaternion'
+    frames = sorted(_key_times(action, path))
+    if not frames:
+        return None
+    columns = _sample_columns(_curve_map(action), path, frames)
+    digest = hashlib.sha1()
+    digest.update(','.join(str(frame) for frame in frames).encode())
+    for values in columns:
+        digest.update(','.join(f'{value:.5f}' for value in values).encode())
+    return digest.hexdigest()
+
+
+def _finger_bones(armature):
     for side in ('.L', '.R'):
         for chain in _FINGER_CHAINS:
             for base in chain[:3]:
                 name = base + side
-                if armature.pose.bones.get(name) is None:
-                    continue
-                _backup_finger_rotation(action, armature, name)
-    return fix_fingers(armature)
+                if armature.pose.bones.get(name) is not None:
+                    yield name
+
+
+def _record_finger_signatures(action, armature):
+    for name in _finger_bones(armature):
+        pose_bone = armature.pose.bones[name]
+        signature = _finger_signature(action, name)
+        if signature is None:
+            if _FINGER_FIX_HASH in pose_bone:
+                del pose_bone[_FINGER_FIX_HASH]
+        else:
+            pose_bone[_FINGER_FIX_HASH] = signature
+
+
+def finger_fix_modified(armature):
+    """修复后手指曲线是否被手动修改过。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+    for name in _finger_bones(armature):
+        stored = armature.pose.bones[name].get(_FINGER_FIX_HASH)
+        if stored is None:
+            continue
+        if _finger_signature(action, name) != stored:
+            return True
+    return False
+
+
+def apply_finger_fix(armature):
+    """备份原始旋转后执行手指修复，并记录修复后的曲线指纹。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return 0
+    for name in _finger_bones(armature):
+        _backup_finger_rotation(action, armature, name)
+    fixed = fix_fingers(armature)
+    _record_finger_signatures(action, armature)
+    return fixed
 
 
 def revert_finger_fix(armature):
@@ -1163,14 +1212,12 @@ def revert_finger_fix(armature):
     if action is None:
         return 0
     restored = 0
-    for side in ('.L', '.R'):
-        for chain in _FINGER_CHAINS:
-            for base in chain[:3]:
-                name = base + side
-                if armature.pose.bones.get(name) is None:
-                    continue
-                if _restore_finger_rotation(action, armature, name):
-                    restored += 1
+    for name in _finger_bones(armature):
+        pose_bone = armature.pose.bones[name]
+        if _FINGER_FIX_HASH in pose_bone:
+            del pose_bone[_FINGER_FIX_HASH]
+        if _restore_finger_rotation(action, armature, name):
+            restored += 1
     return restored
 
 
@@ -1698,6 +1745,16 @@ class FLOWHMR2VMD_OT_set_finger_fix(bpy.types.Operator):
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
                                  default='DISABLED')
+
+    def invoke(self, context, event):
+        if self.mode == 'DISABLED' and not bpy.app.background:
+            _root, armature = _selected_model(context)
+            if armature is not None and finger_fix_modified(armature):
+                return context.window_manager.invoke_confirm(
+                    self, event, title='手指修复',
+                    message='检测到手指关键帧在修复后被修改，关闭会覆盖这些修改，是否继续？',
+                    confirm_text='继续关闭', icon='WARNING')
+        return self.execute(context)
 
     def execute(self, context):
         props = getattr(context.scene, 'flowhmr2vmd_properties', None)
