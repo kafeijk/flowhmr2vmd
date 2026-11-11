@@ -714,6 +714,39 @@ def restore_ex_from_ex_custom(armature):
     return restored
 
 
+def toe_conversion_conflict(armature, enabled):
+    """开关脚尖旋转时，目标骨骼是否已有会被覆盖的旋转关键帧。"""
+    action = armature.animation_data.action if armature.animation_data else None
+    if action is None:
+        return False
+
+    def has_rotation(name):
+        return any(_curves(action, f'pose.bones["{name}{side}"].rotation_quaternion')
+                   for side in ('.L', '.R'))
+
+    bones = armature.data.bones
+    # 模型是否有 つま先 与 足先EX 骨骼
+    has_toe = all(bones.get(f'{_TOE_BONE}{side}') is not None for side in ('.L', '.R'))
+    has_ex = all(bones.get(f'{_EX_BONE}{side}') is not None for side in ('.L', '.R'))
+    # 没有 足先EX 时不会写入任何曲线
+    if not has_ex:
+        return False
+    # 无 つま先：只有开启时会用自定义属性覆盖 足先EX 的曲线
+    if not has_toe:
+        # 关闭只是把当前曲线存成备份，不会覆盖用户数据
+        if not enabled:
+            return False
+        # 已有自定义属性备份，开启会覆盖 足先EX 已有的曲线
+        stored = any(_curves(action, _ex_custom_path(side, component))
+                     for side in ('.L', '.R')
+                     for component in _EX_CUSTOM_PROPS)
+        return stored and has_rotation(_EX_BONE)
+    # 有 つま先：开启时 つま先 → 足先EX，关闭时 足先EX → つま先
+    source, target = (_TOE_BONE, _EX_BONE) if enabled else (_EX_BONE, _TOE_BONE)
+    # 源与目标同时有关键帧时，搬运会覆盖目标已有曲线
+    return has_rotation(source) and has_rotation(target)
+
+
 @timeit
 def convert_toe_rotation(armature, enabled):
     """
@@ -1725,6 +1758,17 @@ class FLOWHMR2VMD_OT_set_toe_rotation(bpy.types.Operator):
 
     mode: bpy.props.EnumProperty(name='操作', items=_MODE_ITEMS,
                                  default='DISABLED')
+
+    def invoke(self, context, event):
+        if not bpy.app.background:
+            _root, armature = _selected_model(context)
+            enabled = self.mode == 'ENABLED'
+            if armature is not None and toe_conversion_conflict(armature, enabled):
+                return context.window_manager.invoke_confirm(
+                    self, event, title='脚尖旋转',
+                    message='目标骨骼已有旋转关键帧，继续操作会覆盖这些关键帧，是否继续？',
+                    confirm_text='继续', icon='WARNING')
+        return self.execute(context)
 
     def execute(self, context):
         props = context.scene.flowhmr2vmd_properties
