@@ -598,11 +598,6 @@ def _ex_custom_path(side, component):
     return f'pose.bones["{_EX_BONE}{side}"]["flowhmr_ex_q{component}"]'
 
 
-def _has_ex_custom(action, side):
-    return all(_curves(action, _ex_custom_path(side, component))
-               for component in _EX_CUSTOM_PROPS)
-
-
 def _reset_bone_rotation(armature, bone_name):
     """恢复骨骼静置姿态。"""
     pose_bone = armature.pose.bones.get(bone_name)
@@ -747,16 +742,18 @@ def convert_toe_rotation(armature, enabled):
     if has_toe:
         source, target = (_TOE_BONE, _EX_BONE) if enabled else (_EX_BONE, _TOE_BONE)
         for side in ('.L', '.R'):
+            # 有 つま先 就正常与 足先EX 交换关键帧，没有 足先EX 时跳过即可
             _convert_bone_rotation(action, armature, source + side, target + side)
             # 开启时归位 つま先，关闭时归位 足先EX（对应语义均为源骨骼）
             _reset_bone_rotation(armature, source + side)
         return True, ''
     if enabled:
+        # 没有 つま先 时，足先EX 从自定义属性中获取关键帧
         restore_ex_from_ex_custom(armature)
-    elif any(_has_ex_custom(action, side) for side in ('.L', '.R')):
-        clear_ex_bone_curves(armature)
     else:
+        # 关闭时把 足先EX 的关键帧存入自定义属性，再清空骨骼动画并归位
         store_ex_to_ex_custom(armature)
+        clear_ex_bone_curves(armature)
     return True, ''
 
 
