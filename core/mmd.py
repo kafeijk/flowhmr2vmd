@@ -12,48 +12,35 @@ def mmd_tools_enabled():
     return hasattr(bpy.types.Object, 'mmd_type')
 
 
-def _find_root(child):
+def find_pmx_root_with_child(child):
+    """根据child寻找pmx对应空物体"""
+    if not child:
+        return None
+
     parent = child
     while parent:
         if getattr(parent, 'mmd_type', None) == 'ROOT':
             return parent
         parent = parent.parent
+
     return None
 
 
-def _find_armature(root):
+def find_armature(root):
     return next((o for o in root.children if o.type == 'ARMATURE'), None)
 
 
 def find_root_and_armature(obj):
     if obj is None or not mmd_tools_enabled():
         return None, None
-    root = _find_root(obj)
+    root = find_pmx_root_with_child(obj)
     if root is None:
         return None, None
-    return root, _find_armature(root)
+    return root, find_armature(root)
 
 
-def meshes_for(armature):
-    meshes = []
-    for obj in bpy.data.objects:
-        if obj.type != 'MESH':
-            continue
-        try:
-            if obj.find_armature() == armature:
-                meshes.append(obj)
-        except Exception:
-            continue
-    if meshes:
-        return meshes
-    # Fallback for unusual hierarchies: walk the armature's children.
-    stack = list(armature.children)
-    while stack:
-        obj = stack.pop()
-        if obj.type == 'MESH':
-            meshes.append(obj)
-        stack.extend(obj.children)
-    return meshes
+def find_pmx_objects(armature):
+    return list(child for child in armature.children if child.type == 'MESH' and child.mmd_type == 'NONE')
 
 
 def trajectory_root(armature, mapping):
@@ -97,7 +84,7 @@ def validate_mapping(armature, mapping):
         trajectory_root(armature, mapping)
     except ValueError as exc:
         return str(exc)
-    if not meshes_for(armature):
+    if not find_pmx_objects(armature):
         return '骨架下没有蒙皮网格，无法计算脚底接触。'
     return None
 

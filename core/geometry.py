@@ -29,12 +29,12 @@ def _bone_map(armature, mapping):
     return result, mapped
 
 
-def build_contact_geometry(armature, meshes, mapping, rest):
+def build_contact_geometry(armature, objects, mapping, rest):
     bone_map, mapped = _bone_map(armature, mapping)
     vertices = []
     weights = []
     wrist_weights = []
-    for obj in meshes:
+    for obj in objects:
         matrix = np.array(obj.matrix_world)
         count = len(obj.data.vertices)
         co = np.empty(count * 3, np.float32)

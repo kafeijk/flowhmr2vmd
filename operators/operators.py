@@ -1,21 +1,21 @@
 """Operator orchestration: source -> external solver -> armature keyframes."""
-import functools
 import shutil
-import time
 import traceback
+from pathlib import Path
+
 import bpy
 import numpy as np
 
-from ..core import bake, geometry, mmd, smplh, solver_client
-from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 from .bone_operators import (apply_finger_fix, clear_toe_bone_curves,
                              convert_toe_rotation, restore_toe_from_custom,
                              standardize_channels, store_toe_to_custom)
+from ..core import bake, geometry, mmd, smplh, solver_client
+from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 
 
 def _middle_spine_name(bones):
-    """上半身 与 上半身2 之间唯一的中间骨（上半身1 / 上半身3 等）。
-
+    """
+    上半身 与 上半身2 之间唯一的中间骨（上半身1 / 上半身3 等）。
     两者之间没有骨骼或不止一个时返回 None。
     """
     lower = bones.get('上半身')
@@ -33,11 +33,7 @@ def _middle_spine_name(bones):
 
 
 def _reset_to_rest(root, armature):
-    """把角色恢复到静置状态，保证每次重定向从同一基准开始。
-
-    会清掉上一次的动作、残留的 pose 变换、IK 开关关键帧，以及
-    root / 骨架对象的位置旋转；缩放保留（PMX 导入常带缩放）。
-    """
+    """把角色恢复到静置状态，保证每次重定向从同一基准开始。"""
     for obj in (root, armature):
         if obj is None:
             continue
@@ -68,14 +64,34 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
 
     def check_props(self, props):
         """在执行重定向之前的校验"""
-        folder = bpy.path.abspath(getattr(props, 'folder', '') if props else '')
-        if not folder:
-            self.report({'ERROR'}, '请选择 FlowHMR 动作目录。')
+        if not mmd.mmd_tools_enabled():
+            self.report({'ERROR'}, '请启用 MMD Tools 插件！')
             return False, None
-        from pathlib import Path
+
+        roots = set()
+        for obj in bpy.context.selected_objects:
+            root = mmd.find_pmx_root_with_child(obj)
+            if root is not None:
+                roots.add(root)
+        if not roots:
+            self.report({'ERROR'}, '请选择 MMD 模型！')
+            return False, None
+        if len(roots) > 1:
+            self.report({'ERROR'}, '请选择单个 MMD 模型！')
+            return False, None
+        root = roots.pop()
+        armature = mmd.find_armature(root)
+        if armature is None:
+            self.report({'ERROR'}, '未找到模型骨架！')
+            return False, None
+
+        folder = bpy.path.abspath(props.folder)
+        if not folder:
+            self.report({'ERROR'}, '请选择 FlowHMR 动作目录！')
+            return False, None
         path = Path(folder)
         if not path.is_dir():
-            self.report({'ERROR'}, '所选文件夹不存在。')
+            self.report({'ERROR'}, '动作目录不存在！')
             return False, None
 
         final_path = smplh.find_final_npz(path)
@@ -101,58 +117,60 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
                         '工程缺少 surface 文件（raw_file），将跳过表面证据阶段，'
                         '脚部效果与 toyxyz 不完全一致。')
 
-        context = bpy.context
-        selected = list(context.selected_objects)
-        obj = context.active_object if context.active_object in selected else (
-            selected[0] if selected else None)
-        if obj is None:
-            self.report({'ERROR'}, '请先在视图中选中一个 MMD 模型对象。')
-            return False, None
-        if not mmd.mmd_tools_enabled():
-            self.report({'ERROR'}, '请先启用 MMD Tools 插件。')
-            return False, None
-        root, armature = mmd.find_root_and_armature(obj)
-        if root is None:
-            self.report({'ERROR'}, '选中的对象不属于 MMD 模型，未找到 PMX Root。')
-            return False, None
-        if armature is None:
-            self.report({'ERROR'}, '在 PMX Root 下未找到骨架。')
-            return False, None
-
-        mapping = list(NATIVE_MAPPING)
         bones = armature.data.bones
-        middle_spine = _middle_spine_name(bones)
-        has_upper1 = middle_spine is not None
-        # 任一侧缺少 つま先 就按两侧都没有处理，只留一半没有意义。
-        has_toe = all(bones.get(f'つま先{side}') is not None
-                      for side in ('.L', '.R'))
-        has_tip = all(bones.get(f'足先EX{side}') is not None
-                      for side in ('.L', '.R'))
-        missing = [name for index, name in enumerate(mapping)
+        missing = [name for index, name in enumerate(NATIVE_MAPPING)
                    if index not in OPTIONAL_MAPPING_INDEX and
                    bones.get(name) is None]
         if missing:
             self.report({'ERROR'}, '骨架缺少以下必需骨骼：' + '、'.join(missing))
             return False, None
-        if not mmd.meshes_for(armature):
-            self.report({'ERROR'}, '骨架下没有蒙皮网格，无法计算脚底接触。')
+        if not mmd.find_pmx_objects(armature):
+            self.report({'ERROR'}, '模型网格对象不存在！无法计算脚底接触。')
             return False, None
+        return True, dict(root=root, armature=armature, path=path, source=source)
+
+    def execute(self, context):
+        props = context.scene.flowhmr2vmd_properties
+        ok, data = self.check_props(props)
+        if not ok:
+            return {'CANCELLED'}
+        return self._run(data, props)
+
+    def _run(self, data, props):
+        root = data['root']
+        armature = data['armature']
+        path = data['path']
+        source = data['source']
+
+        bones = armature.data.bones
+        # 脊柱中间骨命名不唯一，动态获取
+        middle_spine = _middle_spine_name(bones)
+        has_upper1 = middle_spine is not None
+        # 任一侧缺少 つま先、足先EX 就按两侧都没有处理，只留一半没有意义。
+        has_toe = all(bones.get(f'つま先{side}') is not None for side in ('.L', '.R'))
+        has_ex = all(bones.get(f'足先EX{side}') is not None for side in ('.L', '.R'))
+        # 基于 RGB MoCap 项目的参与重定向的骨骼
+        mapping = list(NATIVE_MAPPING)
         skip_indices = []
         if has_upper1:
-            # 中间骨按层级确定，可能是 上半身1、上半身3 等。
+            # 替换脊柱中间骨名称
             mapping[6] = middle_spine
         else:
-            # 中间骨不存在：丢弃该槽位，Spine1 的旋转已包含在 上半身2
-            # 的绝对世界旋转里，效果等同并入 上半身2。
+            # 中间骨不存在则丢弃，Spine1 的旋转已包含在 上半身2 的绝对世界旋转里，效果等同并入 上半身2
             mapping[6] = '上半身2'
             skip_indices.append(6)
         if not has_toe:
-            if has_tip:
+            # 中当模型不存在つま先但存在足先EX时，将脚尖关键帧写入足先EX的自定义属性中
+            if has_ex:
                 mapping[10] = '足先EX.L'
                 mapping[11] = '足先EX.R'
             else:
+                # 若足先EX也不存在，则丢弃脚尖运动
                 skip_indices.extend((10, 11))
-        meshes = mmd.meshes_for(armature)
+
+        saved_location = root.location.copy()
+        _reset_to_rest(root, armature)
+        objects = mmd.find_pmx_objects(armature)
         rest = np.empty((22, 3), np.float64)
 
         def head(name):
@@ -164,97 +182,68 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
                 rest[index] = (head('上半身') + head('上半身2')) * .5
             elif index in (10, 11) and not has_toe:
                 side = '.L' if index == 10 else '.R'
-                rest[index] = head(('足先EX' if has_tip else '足首') + side)
+                rest[index] = head(('足先EX' if has_ex else '足首') + side)
             else:
                 rest[index] = head(name)
 
         try:
-            contact = geometry.build_contact_geometry(armature, meshes, mapping, rest)
+            contact = geometry.build_contact_geometry(armature, objects, mapping, rest)
         except geometry.GeometryError as exc:
             self.report({'ERROR'}, str(exc))
-            return False, None
-        return True, dict(
-            root=root, armature=armature, path=path, source=source,
-            mapping=mapping, rest=rest, contact=contact,
-            skip_indices=skip_indices, has_upper1=has_upper1,
-            has_toe=has_toe, has_tip=has_tip)
-
-    def execute(self, context):
-        props = getattr(context.scene, 'flowhmr2vmd_properties', None)
-        ok, data = self.check_props(props)
-        if not ok:
             return {'CANCELLED'}
-        return self._run(data, props)
 
-    def _run(self, data, props):
-        root = data['root']
-        armature = data['armature']
-        path = data['path']
-        source = data['source']
-        mapping = data['mapping']
-        rest = data['rest']
-        contact = data['contact']
-        skip_indices = data['skip_indices']
-        has_upper1 = data['has_upper1']
-        has_toe = data['has_toe']
-        has_tip = data['has_tip']
-        saved_location = root.location.copy()
+        request_project = source['project']
+        temp = solver_client.make_temp()
         try:
-            _reset_to_rest(root, armature)
-            request_project = source['project']
-            temp = solver_client.make_temp()
-            try:
-                request = temp / 'request.npz'
-                solver_client.write_request(
-                    request, source, rest, mapping, contact,
-                    source['source_names'], False, project=request_project)
-                stance_path, score = solver_client.run_solver(request, temp, path)
-                stance = solver_client.read_stance(stance_path)
-                result = bake.bake_solution(
-                    armature, mapping, stance, source, skip_indices=skip_indices)
-            except solver_client.SolverError as exc:
-                self.report({'ERROR'}, str(exc))
-                return {'CANCELLED'}
-            except Exception as exc:
-                detail = traceback.format_exc()
-                print(detail)
-                self.report({'ERROR'}, f'生成动作失败：{exc}')
-                return {'CANCELLED'}
-            finally:
-                shutil.rmtree(temp, ignore_errors=True)
-
-            # 重定向后自动标准化：腰 旋转增量到 上半身/下半身，位移搬到 センター。
-            standardize_channels(armature)
-            toe_enabled = bool(props is not None and
-                               props.toe_rotation == 'ENABLED')
-            if not has_toe and has_tip:
-                store_toe_to_custom(armature)
-                if toe_enabled:
-                    restore_toe_from_custom(armature)
-            elif has_toe and toe_enabled:
-                convert_toe_rotation(armature, True)
-            elif has_toe:
-                # 关闭脚尖旋转：清掉 FK→IK 阶段写出的 足先EX 姿态并归位。
-                clear_toe_bone_curves(armature)
-            if props is not None and props.finger_fix == 'ENABLED':
-                apply_finger_fix(armature)
-
-            text = (f"已完成重定向，共 {result['frames']} 帧。")
-            if not has_upper1:
-                text += ' 缺少脊柱中间骨，结果已并入「上半身2」。'
-            if not has_toe:
-                if has_tip:
-                    text += (' 缺少「つま先」，脚尖旋转已存入「足先EX」的自定义通道'
-                             '（开关默认关闭）。')
-                else:
-                    text += ' 缺少「つま先」和「足先EX」，脚尖数据已丢弃。'
-            self.report({'INFO'}, text)
-            if score.get('pt_fallback'):
-                self.report({'WARNING'},
-                            '读取 corrected_initial.pt 失败，已用工程 rig 旋转代替 native 旋转：'
-                            + str(score['pt_fallback'])[-200:])
-            return {'FINISHED'}
+            request = temp / 'request.npz'
+            solver_client.write_request(
+                request, source, rest, mapping, contact,
+                source['source_names'], False, project=request_project)
+            stance_path, score = solver_client.run_solver(request, temp, path)
+            stance = solver_client.read_stance(stance_path)
+            result = bake.bake_solution(
+                armature, mapping, stance, source, skip_indices=skip_indices)
+        except solver_client.SolverError as exc:
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        except Exception as exc:
+            detail = traceback.format_exc()
+            print(detail)
+            self.report({'ERROR'}, f'生成动作失败：{exc}')
+            return {'CANCELLED'}
         finally:
-            root.location = saved_location
+            shutil.rmtree(temp, ignore_errors=True)
 
+        # 重定向后执行标准化
+        standardize_channels(armature)
 
+        # 若脚尖旋转等可选项被勾选，则重定向后默认执行一次
+        toe_enabled = props.toe_rotation == 'ENABLED'
+        if not has_toe and has_ex:
+            store_toe_to_custom(armature)
+            if toe_enabled:
+                restore_toe_from_custom(armature)
+        elif has_toe and toe_enabled:
+            convert_toe_rotation(armature, True)
+        elif has_toe:
+            clear_toe_bone_curves(armature)
+        if props.finger_fix == 'ENABLED':
+            apply_finger_fix(armature)
+
+        text = f"已完成重定向，共 {result['frames']} 帧。"
+        if not has_upper1:
+            text += '缺少脊柱中间骨，结果已并入「上半身2」。'
+        if not has_toe:
+            if has_ex:
+                text += '缺少「つま先」，脚尖旋转已存入「足先EX」的自定义通道。'
+            else:
+                text += '缺少「つま先」和「足先EX」，脚尖数据已丢弃。'
+        self.report({'INFO'}, text)
+
+        if score.get('pt_fallback'):
+            self.report({'WARNING'},
+                        '读取 corrected_initial.pt 失败，已用工程 rig 旋转代替 native 旋转：'
+                        + str(score['pt_fallback'])[-200:])
+
+        root.location = saved_location
+        return {'FINISHED'}
