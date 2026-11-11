@@ -463,43 +463,72 @@ def _move_master_to_center(action, armature):
 
 
 def _convert_bone_rotation(action, armature, source_name, target_name):
-    """把 source_name 的旋转曲线按世界等价转到 target_name。
+    """
+    将源骨骼相对于静息姿态的旋转差，转换到目标骨骼的局部坐标系中。
 
-    两条骨骼只差一个静息朝向的共轭变换：
+    计算源骨骼当前姿态与静息姿态在世界坐标系下的旋转差，
+    再将该旋转差转换为目标骨骼局部坐标系下的旋转。
+
     q_target = R_target⁻¹ · R_source · q_source · R_source⁻¹ · R_target
-    纯曲线求值，不需要逐帧更新场景。
+
+    其中：
+        R_source：源骨骼的世界静息朝向。
+        R_target：目标骨骼的世界静息朝向。
+        q_source：源骨骼当前相对于静息姿态的旋转。
+        q_target：转换后的目标骨骼局部旋转。
+
+    通过动画曲线求值和写入完成转换，避免约束逐帧更新场景。
     """
     source_path = f'pose.bones["{source_name}"].rotation_quaternion'
     if not _curves(action, source_path):
         return False
+
     source_bone = armature.data.bones.get(source_name)
     target_bone = armature.data.bones.get(target_name)
     if source_bone is None or target_bone is None:
         return False
+
+    # 获取骨架对象的世界旋转，将两根骨骼的静息朝向转换到世界坐标系。
     world_rotation = armature.matrix_world.to_quaternion()
     source_rest = world_rotation @ source_bone.matrix_local.to_quaternion()
     target_rest = world_rotation @ target_bone.matrix_local.to_quaternion()
+
+    # 构建源骨骼与目标骨骼之间的静息朝向转换关系。
+    # left：目标骨骼世界静息朝向的逆旋转 × 源骨骼世界静息朝向。
+    # right：源骨骼世界静息朝向的逆旋转 × 目标骨骼世界静息朝向。
     left = target_rest.inverted() @ source_rest
     right = source_rest.inverted() @ target_rest
+
+    # 获取源骨骼动画曲线及所有关键帧时间。
     curves = _curve_map(action)
     frames = sorted(_key_times(action, source_path))
     quaternions = []
+
+    # 逐帧求值源骨骼旋转，并转换到目标骨骼的局部坐标系。
     for frame in frames:
         q_source = _quaternion_at(curves, source_path, frame)
         quaternions.append((left @ q_source @ right).normalized())
+
     if not quaternions:
         return False
+
+    # 将转换后的四元数写入目标骨骼动画曲线。
     _write_curves(action, f'pose.bones["{target_name}"].rotation_quaternion',
                   frames, [[q[i] for q in quaternions] for i in range(4)])
+
+    # 删除源骨骼的所有旋转动画曲线，避免重复驱动。
     for prop in ('rotation_quaternion', 'rotation_euler',
                  'rotation_axis_angle'):
         _remove_curves(action, f'pose.bones["{source_name}"].{prop}')
+
+    # 将源骨骼当前姿态恢复为静息旋转。
     source_pose = armature.pose.bones.get(source_name)
     if source_pose is not None:
         source_pose.rotation_mode = 'QUATERNION'
         source_pose.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
         source_pose.rotation_euler = (0.0, 0.0, 0.0)
         source_pose.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+
     return True
 
 
@@ -518,7 +547,7 @@ def _has_ex_custom(action, side):
 
 
 def _reset_bone_rotation(armature, bone_name):
-    """把骨骼的当前姿态旋转归位到静置值。"""
+    """恢复骨骼静置姿态。"""
     pose_bone = armature.pose.bones.get(bone_name)
     if pose_bone is None:
         return
@@ -632,33 +661,37 @@ def restore_toe_from_ex_custom(armature):
 
 @timeit
 def convert_toe_rotation(armature, enabled):
-    """在 つま先 与 足先EX 之间搬运旋转；没有 つま先 时使用自定义属性。
+    """
+    在 つま先 与 足先EX 之间转移旋转数据；当不存在 つま先 时，使用 足先EX 的自定义属性作为替代。
 
-    开启：つま先 → 足先EX；没有 つま先 时：自定义属性 → 足先EX。
-    关闭：足先EX → つま先；没有 つま先 时：清空 足先EX 骨骼关键帧。
-    没有 足先EX 时直接丢弃，不报错。
+    开启：
+    - つま先 → 足先EX，清空 つま先 的动画曲线并归位。
+    - 不存在 つま先 时：自定义属性 → 足先EX。
+
+    关闭：
+    - 足先EX → つま先，清空 足先EX 的动画曲线并归位。
+    - 不存在 つま先 时：足先EX → 自定义属性，清空 足先EX 的动画曲线并归位。
     """
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return True, ''
+
     bones = armature.data.bones
-    has_toe = all(bones.get(f'{_TOE_BONE}{side}') is not None
-                  for side in ('.L', '.R'))
-    has_ex = all(bones.get(f'{_EX_BONE}{side}') is not None
-                 for side in ('.L', '.R'))
+    has_toe = all(bones.get(f'{_TOE_BONE}{side}') is not None for side in ('.L', '.R'))
+    has_ex = all(bones.get(f'{_EX_BONE}{side}') is not None for side in ('.L', '.R'))
+    # 缺少 足先EX 时开启脚尖旋转，提示错误
+    if not has_ex and enabled:
+        return False, '骨架缺少「足先EX」骨骼，无法开启脚尖旋转。'
+    # 缺少 足先EX 时关闭脚尖旋转，无影响
     if not has_ex:
-        if enabled:
-            return False, '骨架缺少「足先EX」骨骼，无法开启脚尖旋转。'
         return True, ''
+
     if has_toe:
-        source, target = ((_TOE_BONE, _EX_BONE) if enabled
-                          else (_EX_BONE, _TOE_BONE))
+        source, target = (_TOE_BONE, _EX_BONE) if enabled else (_EX_BONE, _TOE_BONE)
         for side in ('.L', '.R'):
-            _convert_bone_rotation(action, armature, source + side,
-                                   target + side)
-            if not enabled:
-                # 关闭时 足先EX 不再承载旋转，姿态也要归位。
-                _reset_bone_rotation(armature, source + side)
+            _convert_bone_rotation(action, armature, source + side, target + side)
+            # 开启时归位 つま先，关闭时归位 足先EX（对应语义均为源骨骼）
+            _reset_bone_rotation(armature, source + side)
         return True, ''
     if enabled:
         restore_toe_from_ex_custom(armature)
@@ -1519,14 +1552,14 @@ def adjust_foot_spacing(armature, spacing_m):
         if not channel_curves:
             frame = bpy.context.scene.frame_current
             pose_bone.location += rest_inverse @ (
-                lateral_at(frame) * (sign * shift))
+                    lateral_at(frame) * (sign * shift))
             continue
         frames = sorted({round(point.co.x) for fcurve in channel_curves.values()
                          for point in fcurve.keyframe_points})
         if not frames:
             frame = bpy.context.scene.frame_current
             pose_bone.location += rest_inverse @ (
-                lateral_at(frame) * (sign * shift))
+                    lateral_at(frame) * (sign * shift))
             continue
         deltas = {frame: rest_inverse @ (lateral_at(frame) * (sign * shift))
                   for frame in frames}
