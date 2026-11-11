@@ -89,7 +89,7 @@ def validate_mapping(armature, mapping):
     return None
 
 
-def toe_is_granted(armature, mapping):
+def ex_is_granted(armature, mapping):
     """True when 足先EX sits under the hidden granted 足首D chain."""
     if mapping[10] != '足先EX.L':
         return False

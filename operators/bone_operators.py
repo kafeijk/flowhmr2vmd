@@ -503,17 +503,18 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
     return True
 
 
-_TOE_BONES = ('つま先', '足先EX')
-_TOE_CUSTOM_PROPS = ('w', 'x', 'y', 'z')
+_TOE_BONE = 'つま先'
+_EX_BONE = '足先EX'
+_EX_CUSTOM_PROPS = ('w', 'x', 'y', 'z')
 
 
-def _toe_custom_path(side, component):
-    return f'pose.bones["{_TOE_BONES[1]}{side}"]["flowhmr_toe_q{component}"]'
+def _ex_custom_path(side, component):
+    return f'pose.bones["{_EX_BONE}{side}"]["flowhmr_ex_q{component}"]'
 
 
-def _has_toe_custom(action, side):
-    return all(_curves(action, _toe_custom_path(side, component))
-               for component in _TOE_CUSTOM_PROPS)
+def _has_ex_custom(action, side):
+    return all(_curves(action, _ex_custom_path(side, component))
+               for component in _EX_CUSTOM_PROPS)
 
 
 def _reset_bone_rotation(armature, bone_name):
@@ -529,7 +530,7 @@ def _reset_bone_rotation(armature, bone_name):
         pose_bone.rotation_euler = (0.0, 0.0, 0.0)
 
 
-def clear_toe_bone_curves(armature, side=None):
+def clear_ex_bone_curves(armature, side=None):
     """清空 足先EX 的骨骼关键帧并把骨骼姿态归位，保留自定义属性通道。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
@@ -537,13 +538,13 @@ def clear_toe_bone_curves(armature, side=None):
     sides = (side,) if side else ('.L', '.R')
     cleared = False
     for value in sides:
-        prefix = f'pose.bones["{_TOE_BONES[1]}{value}"]'
+        prefix = f'pose.bones["{_EX_BONE}{value}"]'
         for fcurve in [fc for fc in action.fcurves
                        if fc.data_path.startswith(prefix + '.')]:
             action.fcurves.remove(fcurve)
             cleared = True
         # 删除曲线不会改变当前姿态值，必须显式归位。
-        _reset_bone_rotation(armature, _TOE_BONES[1] + value)
+        _reset_bone_rotation(armature, _EX_BONE + value)
     return cleared
 
 
@@ -568,47 +569,47 @@ def _write_custom_property_curve(pose_bone, prop_name, frames, values):
     return True
 
 
-def store_toe_to_custom(armature):
+def store_toe_to_ex_custom(armature):
     """把 足先EX 的旋转曲线备份到自定义属性，并清空骨骼关键帧。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
     stored = False
     for side in ('.L', '.R'):
-        if armature.pose.bones.get(_TOE_BONES[1] + side) is None:
+        if armature.pose.bones.get(_EX_BONE + side) is None:
             continue
-        pose_bone = armature.pose.bones[_TOE_BONES[1] + side]
-        rotation_path = f'pose.bones["{_TOE_BONES[1]}{side}"].rotation_quaternion'
+        pose_bone = armature.pose.bones[_EX_BONE + side]
+        rotation_path = f'pose.bones["{_EX_BONE}{side}"].rotation_quaternion'
         if not _curves(action, rotation_path):
             continue
         frames = sorted(_key_times(action, rotation_path))
         if not frames:
             continue
         curves = _curve_map(action)
-        for index, component in enumerate(_TOE_CUSTOM_PROPS):
-            prop_name = f'flowhmr_toe_q{component}'
+        for index, component in enumerate(_EX_CUSTOM_PROPS):
+            prop_name = f'flowhmr_ex_q{component}'
             if pose_bone.get(prop_name) is None:
                 pose_bone[prop_name] = 1.0 if index == 0 else 0.0
             values = [_evaluate(curves, rotation_path, index, frame,
                                 1.0 if index == 0 else 0.0)
                       for frame in frames]
             _write_custom_property_curve(pose_bone, prop_name, frames, values)
-        clear_toe_bone_curves(armature, side)
+        clear_ex_bone_curves(armature, side)
         stored = True
     return stored
 
 
-def restore_toe_from_custom(armature):
+def restore_toe_from_ex_custom(armature):
     """把自定义属性里的脚尖旋转恢复到 足先EX 骨骼曲线。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return False
     restored = False
     for side in ('.L', '.R'):
-        if armature.pose.bones.get(_TOE_BONES[1] + side) is None:
+        if armature.pose.bones.get(_EX_BONE + side) is None:
             continue
-        paths = [_toe_custom_path(side, component)
-                 for component in _TOE_CUSTOM_PROPS]
+        paths = [_ex_custom_path(side, component)
+                 for component in _EX_CUSTOM_PROPS]
         if not all(_curves(action, path) for path in paths):
             continue
         frames = sorted(set().union(*(_key_times(action, path)
@@ -620,10 +621,10 @@ def restore_toe_from_custom(armature):
             [_evaluate(curves, path, 0, frame,
                        1.0 if component == 'w' else 0.0)
              for frame in frames]
-            for component, path in zip(_TOE_CUSTOM_PROPS, paths)
+            for component, path in zip(_EX_CUSTOM_PROPS, paths)
         ]
         _write_curves(action,
-                      f'pose.bones["{_TOE_BONES[1]}{side}"].rotation_quaternion',
+                      f'pose.bones["{_EX_BONE}{side}"].rotation_quaternion',
                       frames, columns, group='toe')
         restored = True
     return restored
@@ -641,17 +642,17 @@ def convert_toe_rotation(armature, enabled):
     if action is None:
         return True, ''
     bones = armature.data.bones
-    has_toe = all(bones.get(f'{_TOE_BONES[0]}{side}') is not None
+    has_toe = all(bones.get(f'{_TOE_BONE}{side}') is not None
                   for side in ('.L', '.R'))
-    has_tip = all(bones.get(f'{_TOE_BONES[1]}{side}') is not None
-                  for side in ('.L', '.R'))
-    if not has_tip:
+    has_ex = all(bones.get(f'{_EX_BONE}{side}') is not None
+                 for side in ('.L', '.R'))
+    if not has_ex:
         if enabled:
             return False, '骨架缺少「足先EX」骨骼，无法开启脚尖旋转。'
         return True, ''
     if has_toe:
-        source, target = ((_TOE_BONES[0], _TOE_BONES[1]) if enabled
-                          else (_TOE_BONES[1], _TOE_BONES[0]))
+        source, target = ((_TOE_BONE, _EX_BONE) if enabled
+                          else (_EX_BONE, _TOE_BONE))
         for side in ('.L', '.R'):
             _convert_bone_rotation(action, armature, source + side,
                                    target + side)
@@ -660,11 +661,11 @@ def convert_toe_rotation(armature, enabled):
                 _reset_bone_rotation(armature, source + side)
         return True, ''
     if enabled:
-        restore_toe_from_custom(armature)
-    elif any(_has_toe_custom(action, side) for side in ('.L', '.R')):
-        clear_toe_bone_curves(armature)
+        restore_toe_from_ex_custom(armature)
+    elif any(_has_ex_custom(action, side) for side in ('.L', '.R')):
+        clear_ex_bone_curves(armature)
     else:
-        store_toe_to_custom(armature)
+        store_toe_to_ex_custom(armature)
     return True, ''
 
 
@@ -1338,14 +1339,14 @@ def _write_custom_bezier(pose_bone, prop_name, frames, values):
     return True
 
 
-def _clean_toe_side(action, armature, side, stats):
-    name = _TOE_BONES[1] + side
+def _clean_ex_side(action, armature, side, stats):
+    name = _EX_BONE + side
     pose_bone = armature.pose.bones.get(name)
     if pose_bone is None:
         return 0
     rotation_path = f'pose.bones["{name}"].rotation_quaternion'
-    custom_paths = [_toe_custom_path(side, component)
-                    for component in _TOE_CUSTOM_PROPS]
+    custom_paths = [_ex_custom_path(side, component)
+                    for component in _EX_CUSTOM_PROPS]
     curves = _curve_map(action)
     bone_frames = (sorted(_key_times(action, rotation_path))
                    if _curves(action, rotation_path) else [])
@@ -1374,14 +1375,14 @@ def _clean_toe_side(action, armature, side, stats):
             Quaternion([
                 _evaluate(curves, path, 0, frame,
                           1.0 if component == 'w' else 0.0)
-                for component, path in zip(_TOE_CUSTOM_PROPS, custom_paths)
+                for component, path in zip(_EX_CUSTOM_PROPS, custom_paths)
             ]).normalized()
             for frame in custom_frames
         ]
         kept_frames, columns = _simplified_quaternion_columns(
             stored, custom_frames)
         for index, path in enumerate(custom_paths):
-            prop = f'flowhmr_toe_q{_TOE_CUSTOM_PROPS[index]}'
+            prop = f'flowhmr_ex_q{_EX_CUSTOM_PROPS[index]}'
             _write_custom_bezier(pose_bone, prop, kept_frames,
                                  columns[index])
         final.update(kept_frames)
@@ -1390,7 +1391,7 @@ def _clean_toe_side(action, armature, side, stats):
             updated = Quaternion([
                 _evaluate(new_curves, path, 0, frame,
                           1.0 if component == 'w' else 0.0)
-                for component, path in zip(_TOE_CUSTOM_PROPS, custom_paths)
+                for component, path in zip(_EX_CUSTOM_PROPS, custom_paths)
             ]).normalized()
             stats['rotation'] = max(stats['rotation'],
                                     value.rotation_difference(updated).angle)
@@ -1398,11 +1399,11 @@ def _clean_toe_side(action, armature, side, stats):
     return 1
 
 
-def clean_toe_tip(armature, stats):
+def clean_ex_rotation(armature, stats):
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         return 0
-    return sum(_clean_toe_side(action, armature, side, stats)
+    return sum(_clean_ex_side(action, armature, side, stats)
                for side in ('.L', '.R'))
 
 
@@ -1628,7 +1629,7 @@ class FLOWHMR2VMD_OT_clean_ik_keys(bpy.types.Operator):
         clean_foot_rotation(armature, stats)
         clean_ankle_rotation(armature, stats)
         clean_toe_rotation(armature, stats)
-        clean_toe_tip(armature, stats)
+        clean_ex_rotation(armature, stats)
         clean_lower_body_rotation(armature, stats)
         self.report({'INFO'},
                     f'足部减少 {stats["removed"]} 帧，最大位移偏差 '
