@@ -23,21 +23,5 @@ NATIVE_MAPPING = ['下半身', '足.L', '足.R', '上半身', 'ひざ.L', 'ひ�
                   '肩.L', '肩.R', '頭', '腕.L', '腕.R', 'ひじ.L', 'ひじ.R',
                   '手首.L', '手首.R']
 
-# Fallback for standard MMD models without 上半身1 / つま先.
-# Index 6 repeats 上半身; the baker keeps the first occurrence and treats
-# index 6 as a virtual middle-spine point.
-FALLBACK_MAPPING = list(NATIVE_MAPPING)
-FALLBACK_MAPPING[6] = '上半身'
-FALLBACK_MAPPING[10] = '足先EX.L'
-FALLBACK_MAPPING[11] = '足先EX.R'
-
-MAPPING_ITEMS = [
-    ('NATIVE', 'RGB MoCap 原生（上半身1 / つま先）',
-     '严格使用 RGB MoCap 原始骨骼名；模型必须同时具备 上半身1 和 つま先'),
-    ('FALLBACK', '兼容写法（上半身 / 足先EX）',
-     '用 上半身 代替 上半身1，用 足先EX 代替 つま先；适用于大多数标准 MMD 模型'),
-]
-
-
-def mapping_for(kind):
-    return list(FALLBACK_MAPPING if kind == 'FALLBACK' else NATIVE_MAPPING)
+# 可选骨骼：缺失时可以丢弃，其余骨骼必须存在。
+OPTIONAL_MAPPING_INDEX = (6, 10, 11)

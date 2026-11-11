@@ -116,15 +116,15 @@ def _finger_extra(armature, stance, source):
     return extra
 
 
-def bake_solution(armature, mapping, stance, source, skip_toe=False):
+def bake_solution(armature, mapping, stance, source, skip_indices=()):
     n = len(stance['root'])
+    skipped = set(skip_indices)
     mapped = {}
     for index, name in enumerate(mapping):
+        if index in skipped:
+            continue
         mapped.setdefault(name, index)
     keyed_body = set(mapped.keys())
-    if skip_toe:
-        keyed_body.discard(mapping[10])
-        keyed_body.discard(mapping[11])
     extra = _finger_extra(armature, stance, source)
     keyed_rotation = set(keyed_body) | set(extra)
     if '腰' in armature.data.bones:
@@ -233,7 +233,7 @@ def bake_solution(armature, mapping, stance, source, skip_toe=False):
         pose_bone.keyframe_insert('rotation_quaternion', frame=1)
         if action is None:
             action = armature.animation_data.action
-            action.name = 'RGBMoCap_SMPLH'
+            action.name = 'FlowHMR2VMD'
         key_values(armature, pose_bone.path_from_id('rotation_quaternion'), q)
 
     root_pose = armature.pose.bones.get(root_name)
@@ -242,10 +242,19 @@ def bake_solution(armature, mapping, stance, source, skip_toe=False):
         root_pose.keyframe_insert('location', frame=1)
         if action is None:
             action = armature.animation_data.action
-            action.name = 'RGBMoCap_SMPLH'
+            action.name = 'FlowHMR2VMD'
         key_values(armature, root_pose.path_from_id('location'), root_location)
     if action is None:
         raise ValueError('没有可写入的骨骼通道。')
+
+    # VMD 导出依赖 mmd_ik_toggle：第一帧关闭足ＩＫ / つま先ＩＫ，让烘焙的 FK 生效。
+    for side in ('.L', '.R'):
+        for base in ('足ＩＫ', 'つま先ＩＫ'):
+            pose_bone = armature.pose.bones.get(base + side)
+            if pose_bone is None or not hasattr(pose_bone, 'mmd_ik_toggle'):
+                continue
+            pose_bone.mmd_ik_toggle = False
+            pose_bone.keyframe_insert('mmd_ik_toggle', frame=1)
 
     scene = bpy.context.scene
     scene.frame_start = 1
@@ -254,4 +263,5 @@ def bake_solution(armature, mapping, stance, source, skip_toe=False):
     scene.render.fps_base = round(source['fps']) / source['fps']
     scene.frame_set(1)
     return dict(action=action.name, frames=n, bones=len(quaternions),
-                muted=muted, skipped_toe=skip_toe)
+                muted=muted,
+                skipped_toe=any(index in skipped for index in (10, 11)))

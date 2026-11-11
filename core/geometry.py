@@ -29,12 +29,12 @@ def _bone_map(armature, mapping):
     return result, mapped
 
 
-def build_contact_geometry(armature, meshes, mapping, rest):
+def build_contact_geometry(armature, objects, mapping, rest):
     bone_map, mapped = _bone_map(armature, mapping)
     vertices = []
     weights = []
     wrist_weights = []
-    for obj in meshes:
+    for obj in objects:
         matrix = np.array(obj.matrix_world)
         count = len(obj.data.vertices)
         co = np.empty(count * 3, np.float32)
@@ -42,16 +42,28 @@ def build_contact_geometry(armature, meshes, mapping, rest):
         co = co.reshape(-1, 3)
         world = (co @ matrix[:3, :3].T + matrix[:3, 3]) @ A
         vertices.append(world)
+        # 预先把“顶点组序号 → 关节槽位”建成整数表，顶点循环里只做
+        # 整数索引，避免每个顶点组都取名字再做字符串查表。
+        joint_by_group = np.full(len(obj.vertex_groups), -1, np.int64)
+        wrist_by_group = np.full(len(obj.vertex_groups), -1, np.int64)
+        for group in obj.vertex_groups:
+            joint = bone_map.get(group.name)
+            if joint is not None:
+                joint_by_group[group.index] = joint
+            for side in (0, 1):
+                if group.name == mapping[20 + side]:
+                    wrist_by_group[group.index] = side
         weight = np.zeros((count, 22))
         wrist = np.zeros((count, 2))
         for vertex in obj.data.vertices:
-            for group in vertex.groups:
-                name = obj.vertex_groups[group.group].name
-                if name in bone_map:
-                    weight[vertex.index, bone_map[name]] += group.weight
-                for side in (0, 1):
-                    if name == mapping[20 + side]:
-                        wrist[vertex.index, side] += group.weight
+            index = vertex.index
+            for item in vertex.groups:
+                joint = joint_by_group[item.group]
+                if joint >= 0:
+                    weight[index, joint] += item.weight
+                side = wrist_by_group[item.group]
+                if side >= 0:
+                    wrist[index, side] += item.weight
         total = weight.sum(1)
         missing = total < 1e-8
         weight[missing, 0] = 1.0

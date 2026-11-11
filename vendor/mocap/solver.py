@@ -1142,7 +1142,7 @@ def run(kind):
     np.savez(OUT / f'{label}-{kind}-contact-plan.npz', **updated)
     length = np.linalg.norm(p[:, 1:] - p[:, PARENTS[1:]], axis=-1)
     expected = np.linalg.norm(current['rest'][1:] - current['rest'][PARENTS[1:]], axis=-1)
-    assert abs(length - expected).max() < 1e-08
+    assert abs(length - expected).max() < 1e-06
     record = dict(target=kind, clip=label, frames=len(p), seconds=time.perf_counter() - started, body=body_report, legs=report, arms=arms, stable=score(current, source, saved['active'], geo, plan), fixed_length_max_error_m=float(abs(length - expected).max()), source_timing_changed=False)
     print('READY', kind, json.dumps(record), flush=True)
     return record

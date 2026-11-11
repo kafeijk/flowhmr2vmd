@@ -1,11 +1,7 @@
-"""Panel properties and finger-limit constraint state."""
+"""Panel properties and toe rotation state."""
 import bpy
 
-from ..core import finger_limits, mmd
-from ..core.constants import MAPPING_ITEMS
-
-_LIMIT_MIN = -180.0
-_LIMIT_MAX = 180.0
+from ..core import mmd
 
 
 def _active_armature(context):
@@ -19,167 +15,134 @@ def _active_armature(context):
     return armature if root is not None else None
 
 
-def _apply(self, context, armature):
-    count, missing = finger_limits.apply_finger_limits(armature, self)
-    status = f'已创建 {count} 根手指限制约束。'
-    if missing:
-        status += f'缺少 {len(missing)} 根：' + '、'.join(missing[:4])
-        if len(missing) > 4:
-            status += '…'
-    self.finger_limit_status = status
+_TOE_ROTATION_ITEMS = (
+    ('ENABLED', '开启', '开启后把脚尖旋转写入 足先EX 骨骼'),
+    ('DISABLED', '关闭', '关闭后清空 足先EX 骨骼关键帧'),
+)
+_updating_toe = False
 
 
-def _update_limit(self, context):
-    if not self.finger_limits_enabled:
+def _show_toe_error(context, message):
+    if bpy.app.background:
+        print('脚尖旋转:', message)
+        return
+    window = getattr(context, 'window', None)
+    if window is None:
+        return
+
+    def draw(menu, _context):
+        menu.layout.label(text=message)
+
+    context.window_manager.popup_menu(draw, title='脚尖旋转', icon='ERROR')
+
+
+def _update_toe_rotation(self, context):
+    global _updating_toe
+    if _updating_toe:
         return
     armature = _active_armature(context)
     if armature is None:
-        self.finger_limits_enabled = False
-        self.finger_limit_status = '请先选中 MMD 模型对象。'
         return
-    _apply(self, context, armature)
+    from ..operators.bone_operators import convert_toe_rotation
+    enabled = self.toe_rotation == 'ENABLED'
+    ok, message = convert_toe_rotation(armature, enabled)
+    if ok:
+        return
+    _updating_toe = True
+    try:
+        self.toe_rotation = 'DISABLED'
+    finally:
+        _updating_toe = False
+    _show_toe_error(context, message)
 
 
-def _update_enabled(self, context):
+_FINGER_FIX_ITEMS = (
+    ('ENABLED', '开启', '开启后清除手指末端多余旋转并补偿第一指节'),
+    ('DISABLED', '关闭', '关闭后把手指旋转恢复到修复前'),
+)
+
+
+def _update_finger_fix(self, context):
     armature = _active_armature(context)
-    if not self.finger_limits_enabled:
-        if armature is not None:
-            count = finger_limits.remove_finger_limits(armature)
-        else:
-            count = sum(
-                finger_limits.remove_finger_limits(obj)
-                for obj in context.scene.objects if obj.type == 'ARMATURE')
-        self.finger_limit_status = f'已删除 {count} 根手指限制约束。'
-        return
     if armature is None:
-        self.finger_limits_enabled = False
-        self.finger_limit_status = '请先选中 MMD 模型对象。'
         return
-    _apply(self, context, armature)
+    from ..operators.bone_operators import (apply_finger_fix,
+                                            revert_finger_fix)
+    if self.finger_fix == 'ENABLED':
+        apply_finger_fix(armature)
+    else:
+        revert_finger_fix(armature)
 
 
-class RGBMOCAP_Properties(bpy.types.PropertyGroup):
+class FLOWHMR2VMD_Properties(bpy.types.PropertyGroup):
     folder: bpy.props.StringProperty(
-        name='文件夹',
-        description='包含 final.npz 或 RGB MoCap 工程 flowhmr 缓存的文件夹',
+        name='动作目录',
+        description='FlowHMR输出的动作所在目录',
         subtype='DIR_PATH',
     )
-    mapping: bpy.props.EnumProperty(
-        name='名称对照',
-        description='选择目标模型的骨骼命名方式',
-        items=MAPPING_ITEMS,
-        default='FALLBACK',
+    foot_spacing: bpy.props.FloatProperty(
+        name='单侧脚间距',
+        description='脚间距的一半',
+        default=0.0,
+        min=-1.0,
+        max=1.0,
+        step=10,
+        precision=2,
     )
-
-    show_finger_limits: bpy.props.BoolProperty(
-        name='展开手指骨骼约束',
-        description='展开后可在下方修改六组基础手指的 XYZ 最小/最大角度',
-        default=False,
+    toe_rotation: bpy.props.EnumProperty(
+        name='脚尖旋转',
+        description='开启后把脚尖旋转写入 足先EX；关闭时清空 足先EX 骨骼关键帧',
+        items=_TOE_ROTATION_ITEMS,
+        default='DISABLED',
+        update=_update_toe_rotation,
     )
-    finger_limits_enabled: bpy.props.BoolProperty(
-        name='创建手指限制旋转约束',
-        description='开启后为 18 根手指创建 LIMIT_ROTATION 约束；关闭时只删除本插件添加的约束',
-        default=False,
-        update=_update_enabled,
+    finger_fix: bpy.props.EnumProperty(
+        name='手指修复',
+        description='开启后清除手指末端多余旋转并补偿第一指节；关闭时恢复修复前',
+        items=_FINGER_FIX_ITEMS,
+        default='ENABLED',
+        update=_update_finger_fix,
     )
-    finger_limit_status: bpy.props.StringProperty(
-        name='手指约束状态',
-        default='',
+    boost_strength: bpy.props.FloatProperty(
+        name='位移增强倍数',
+        description='位移增强的倍数',
+        default=1.0,
+        min=1.0,
+        max=10.0,
+        step=10,
+        precision=2,
     )
-
-    thumb0_x_min: bpy.props.FloatProperty(name='親指０ X 最小', default=-30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb0_x_max: bpy.props.FloatProperty(name='親指０ X 最大', default=60.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb0_y_min: bpy.props.FloatProperty(name='親指０ Y 最小', default=-30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb0_y_max: bpy.props.FloatProperty(name='親指０ Y 最大', default=60.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb0_z_min: bpy.props.FloatProperty(name='親指０ Z 最小', default=-25.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb0_z_max: bpy.props.FloatProperty(name='親指０ Z 最大', default=35.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-
-    thumb1_x_min: bpy.props.FloatProperty(name='親指１ X 最小', default=-30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb1_x_max: bpy.props.FloatProperty(name='親指１ X 最大', default=60.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb1_y_min: bpy.props.FloatProperty(name='親指１ Y 最小', default=-20.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb1_y_max: bpy.props.FloatProperty(name='親指１ Y 最大', default=70.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb1_z_min: bpy.props.FloatProperty(name='親指１ Z 最小', default=-50.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb1_z_max: bpy.props.FloatProperty(name='親指１ Z 最大', default=65.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-
-    thumb2_x_min: bpy.props.FloatProperty(name='親指２ X 最小', default=-15.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb2_x_max: bpy.props.FloatProperty(name='親指２ X 最大', default=30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb2_y_min: bpy.props.FloatProperty(name='親指２ Y 最小', default=-10.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb2_y_max: bpy.props.FloatProperty(name='親指２ Y 最大', default=30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb2_z_min: bpy.props.FloatProperty(name='親指２ Z 最小', default=-70.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    thumb2_z_max: bpy.props.FloatProperty(name='親指２ Z 最大', default=30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-
-    index1_x_min: bpy.props.FloatProperty(name='人指１ X 最小', default=-30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index1_x_max: bpy.props.FloatProperty(name='人指１ X 最大', default=90.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index1_y_min: bpy.props.FloatProperty(name='人指１ Y 最小', default=-12.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index1_y_max: bpy.props.FloatProperty(name='人指１ Y 最大', default=6.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index1_z_min: bpy.props.FloatProperty(name='人指１ Z 最小', default=-15.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index1_z_max: bpy.props.FloatProperty(name='人指１ Z 最大', default=30.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-
-    index2_x_min: bpy.props.FloatProperty(name='人指２ X 最小', default=-25.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index2_x_max: bpy.props.FloatProperty(name='人指２ X 最大', default=140.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index2_y_min: bpy.props.FloatProperty(name='人指２ Y 最小', default=-3.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index2_y_max: bpy.props.FloatProperty(name='人指２ Y 最大', default=1.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index2_z_min: bpy.props.FloatProperty(name='人指２ Z 最小', default=-3.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index2_z_max: bpy.props.FloatProperty(name='人指２ Z 最大', default=1.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-
-    index3_x_min: bpy.props.FloatProperty(name='人指３ X 最小', default=-20.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index3_x_max: bpy.props.FloatProperty(name='人指３ X 最大', default=85.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index3_y_min: bpy.props.FloatProperty(name='人指３ Y 最小', default=-1.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index3_y_max: bpy.props.FloatProperty(name='人指３ Y 最大', default=6.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index3_z_min: bpy.props.FloatProperty(name='人指３ Z 最小', default=-15.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
-    index3_z_max: bpy.props.FloatProperty(name='人指３ Z 最大', default=1.0,
-                                          min=_LIMIT_MIN, max=_LIMIT_MAX, update=_update_limit)
+    boost_axis: bpy.props.EnumProperty(
+        name='增强轴',
+        description='位移增强的方向',
+        items=(('UP', '上', '增强向上的位移'),
+               ('DOWN', '下', '增强向下的位移'),
+               ('LEFT', '左', '增强向左的位移'),
+               ('RIGHT', '右', '增强向右的位移'),
+               ('FRONT', '前', '增强向前的位移'),
+               ('BACK', '后', '增强向后的位移'),
+               ('VERTICAL', '上下', '增强上下方向的位移'),
+               ('SIDE', '左右', '增强左右方向的位移'),
+               ('FRONTBACK', '前后', '增强前后方向的位移'),
+               ('ALL', '全部', '增强上下、左右、前后方向的位移')),
+        default='VERTICAL',
+    )
 
     @staticmethod
     def register():
-        if not hasattr(bpy.types.Scene, 'rgbmocap_properties'):
-            bpy.types.Scene.rgbmocap_properties = bpy.props.PointerProperty(
-                type=RGBMOCAP_Properties)
+        if not hasattr(bpy.types.Scene, 'flowhmr2vmd_properties'):
+            bpy.types.Scene.flowhmr2vmd_properties = bpy.props.PointerProperty(
+                type=FLOWHMR2VMD_Properties)
 
     @staticmethod
     def unregister():
-        if hasattr(bpy.types.Scene, 'rgbmocap_properties'):
-            del bpy.types.Scene.rgbmocap_properties
+        if hasattr(bpy.types.Scene, 'flowhmr2vmd_properties'):
+            del bpy.types.Scene.flowhmr2vmd_properties
 
 
 def register():
-    RGBMOCAP_Properties.register()
+    FLOWHMR2VMD_Properties.register()
 
 
 def unregister():
-    RGBMOCAP_Properties.unregister()
+    FLOWHMR2VMD_Properties.unregister()

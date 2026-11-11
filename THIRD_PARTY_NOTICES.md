@@ -22,17 +22,6 @@ The add-on requires Blender's MMD Tools add-on:
 MMD Tools is not bundled with this add-on. It must be installed and enabled
 separately in Blender.
 
-## MMD Kafei Tools (optional)
-
-If installed, the add-on imports `find_pmx_root_with_child` and
-`find_pmx_armature` from MMD Kafei Tools:
-
-- https://github.com/MMD-Kafei-Tools (BlenderAddonPackageTool)
-- GPL-3.0-or-later.
-
-No MMD Kafei Tools source is redistributed in this add-on. When it is not
-installed, equivalent independently written parent-walk helpers are used.
-
 ## SMPL-H body model
 
 The add-on reads a user-provided SMPL-H `model.npz`. The model is not bundled

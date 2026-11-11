@@ -1,8 +1,7 @@
 """MMD object discovery and skeleton validation.
 
-The public finders follow mmd_kafei_tools' API. If that GPL add-on is
-installed, its functions are imported at runtime; otherwise equivalent
-parent-walk helpers are used. No mmd_kafei_tools source is bundled here.
+Independent implementation: only depends on MMD Tools' ``mmd_type``
+property, no other add-ons are imported.
 
 Portions adapted from RGB MoCap (MIT License).
 """
@@ -13,69 +12,35 @@ def mmd_tools_enabled():
     return hasattr(bpy.types.Object, 'mmd_type')
 
 
-def _finders():
-    """Return (find_root_with_child, find_armature).
+def find_pmx_root_with_child(child):
+    """根据child寻找pmx对应空物体"""
+    if not child:
+        return None
 
-    Prefer MMD Kafei Tools because the user asked to reuse its helpers.
-    The fallback is an independently written parent walk with identical
-    behaviour, so the add-on also works when Kafei Tools is not installed.
-    """
-    try:
-        from mmd_kafei_tools.utils import (find_pmx_armature,
-                                            find_pmx_root_with_child)
-        return find_pmx_root_with_child, find_pmx_armature
-    except Exception:
-        pass
-    try:
-        from addons.mmd_kafei_tools.utils import (find_pmx_armature,
-                                                   find_pmx_root_with_child)
-        return find_pmx_root_with_child, find_pmx_armature
-    except Exception:
-        pass
-    return _fallback_root, _fallback_armature
-
-
-def _fallback_root(child):
     parent = child
     while parent:
         if getattr(parent, 'mmd_type', None) == 'ROOT':
             return parent
         parent = parent.parent
+
     return None
 
 
-def _fallback_armature(root):
+def find_armature(root):
     return next((o for o in root.children if o.type == 'ARMATURE'), None)
 
 
 def find_root_and_armature(obj):
-    find_root, find_armature = _finders()
-    root = find_root(obj)
+    if obj is None or not mmd_tools_enabled():
+        return None, None
+    root = find_pmx_root_with_child(obj)
     if root is None:
         return None, None
     return root, find_armature(root)
 
 
-def meshes_for(armature):
-    meshes = []
-    for obj in bpy.data.objects:
-        if obj.type != 'MESH':
-            continue
-        try:
-            if obj.find_armature() == armature:
-                meshes.append(obj)
-        except Exception:
-            continue
-    if meshes:
-        return meshes
-    # Fallback for unusual hierarchies: walk the armature's children.
-    stack = list(armature.children)
-    while stack:
-        obj = stack.pop()
-        if obj.type == 'MESH':
-            meshes.append(obj)
-        stack.extend(obj.children)
-    return meshes
+def find_pmx_objects(armature):
+    return list(child for child in armature.children if child.type == 'MESH' and child.mmd_type == 'NONE')
 
 
 def trajectory_root(armature, mapping):
@@ -119,12 +84,12 @@ def validate_mapping(armature, mapping):
         trajectory_root(armature, mapping)
     except ValueError as exc:
         return str(exc)
-    if not meshes_for(armature):
+    if not find_pmx_objects(armature):
         return '骨架下没有蒙皮网格，无法计算脚底接触。'
     return None
 
 
-def toe_is_granted(armature, mapping):
+def ex_is_granted(armature, mapping):
     """True when 足先EX sits under the hidden granted 足首D chain."""
     if mapping[10] != '足先EX.L':
         return False
