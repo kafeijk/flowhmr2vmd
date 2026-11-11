@@ -299,7 +299,37 @@ def _remove_curves(action, path):
         action.fcurves.remove(fcurve)
 
 
-def _write_curves(action, path, frames, columns, group='standardize'):
+def _key_styles(fcurve):
+    """读取源曲线的插值信息，须在删除/新增曲线之前调用。"""
+    if fcurve is None:
+        return None
+    points = fcurve.keyframe_points
+    if not len(points):
+        return None
+    if all(point.interpolation == 'BEZIER' and
+           point.handle_left_type == 'FREE' and
+           point.handle_right_type == 'FREE'
+           for point in points):
+        return 'straight'
+    return {round(point.co.x): point.interpolation for point in points}
+
+
+def _apply_key_styles(fcurve, styles):
+    """沿用源曲线的插值方式：直线贝塞尔原样重建，其余按帧复制插值类型。"""
+    if styles == 'straight':
+        _set_straight_bezier(fcurve)
+        return
+    points = fcurve.keyframe_points
+    count = len(points)
+    co = np.empty(count * 2, np.float64)
+    points.foreach_get('co', co)
+    order = {'CONSTANT': 0, 'LINEAR': 1, 'BEZIER': 2}
+    values = [order.get(styles.get(round(frame), 'LINEAR'), 1)
+              for frame in co[0::2]]
+    points.foreach_set('interpolation', values)
+
+
+def _write_curves(action, path, frames, columns, group='standardize', styles=None):
     _remove_curves(action, path)
     count = len(frames)
     co = np.empty((count, 2), np.float64)
@@ -311,7 +341,10 @@ def _write_curves(action, path, frames, columns, group='standardize'):
         fcurve.keyframe_points.add(count)
         co[:, 1] = values
         fcurve.keyframe_points.foreach_set('co', co.ravel())
-        fcurve.keyframe_points.foreach_set('interpolation', linear)
+        if styles is None:
+            fcurve.keyframe_points.foreach_set('interpolation', linear)
+        else:
+            _apply_key_styles(fcurve, styles)
         fcurve.update()
 
 
@@ -534,8 +567,10 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
         return False
 
     # 将转换后的四元数写入目标骨骼动画曲线。
+    styles = _key_styles(curves.get((source_path, 0)))
     _write_curves(action, f'pose.bones["{target_name}"].rotation_quaternion',
-                  frames, [[q[i] for q in quaternions] for i in range(4)])
+                  frames, [[q[i] for q in quaternions] for i in range(4)],
+                  styles=styles)
 
     # 删除源骨骼的所有旋转动画曲线，避免重复驱动。
     for prop in ('rotation_quaternion', 'rotation_euler',
@@ -673,9 +708,11 @@ def restore_toe_from_ex_custom(armature):
              for frame in frames]
             for component, path in zip(_EX_CUSTOM_PROPS, paths)
         ]
+        styles = _key_styles(curves.get((paths[0], 0)))
         _write_curves(action,
                       f'pose.bones["{_EX_BONE}{side}"].rotation_quaternion',
-                      frames, columns, group='toe')
+                      frames, columns, group='toe',
+                      styles=styles)
         restored = True
     return restored
 
@@ -1030,12 +1067,13 @@ def _fix_finger_chain(action, armature, curves, cache, names, axis,
                 quaternion.negate()
             previous[index] = quaternion.copy()
             values[index].append(quaternion)
+    styles = [_key_styles(curves.get((paths[index], 0))) for index in range(3)]
     for index in range(3):
         if index == compensate or present[index]:
             _write_curves(
                 action, paths[index], frames,
                 [[q[i] for q in values[index]] for i in range(4)],
-                group='finger_fix')
+                group='finger_fix', styles=styles[index])
     return True
 
 
@@ -1180,16 +1218,27 @@ def _simplify_indices(points, frames, tolerance):
 
 def _set_straight_bezier(fcurve):
     points = fcurve.keyframe_points
-    for i in range(len(points)):
-        points[i].interpolation = 'BEZIER'
-        points[i].handle_left_type = 'FREE'
-        points[i].handle_right_type = 'FREE'
-    for i in range(len(points) - 1):
-        left = points[i]
-        right = points[i + 1]
-        delta = right.co - left.co
-        left.handle_right = left.co + delta * _MMD_HANDLE_START
-        right.handle_left = left.co + delta * _MMD_HANDLE_END
+    count = len(points)
+    if not count:
+        return
+    co = np.empty(count * 2, np.float64)
+    points.foreach_get('co', co)
+    co = co.reshape(-1, 2)
+    delta = co[1:] - co[:-1]
+    right = co.copy()
+    left = co.copy()
+    right[:-1] = co[:-1] + delta * _MMD_HANDLE_START
+    left[1:] = co[:-1] + delta * _MMD_HANDLE_END
+    # 3.6 的 foreach_set 不支持枚举属性，退化为逐点赋值。
+    points.foreach_set('handle_left_type', [0] * count)
+    points.foreach_set('handle_right_type', [0] * count)
+    if points[0].handle_left_type != 'FREE':
+        for point in points:
+            point.handle_left_type = 'FREE'
+            point.handle_right_type = 'FREE'
+    points.foreach_set('handle_right', right.ravel())
+    points.foreach_set('handle_left', left.ravel())
+    points.foreach_set('interpolation', [2] * count)
     fcurve.update()
 
 
