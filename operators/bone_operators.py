@@ -577,7 +577,7 @@ def _convert_bone_rotation(action, armature, source_name, target_name):
                  'rotation_axis_angle'):
         _remove_curves(action, f'pose.bones["{source_name}"].{prop}')
 
-    # 将源骨骼当前姿态恢复为静息旋转。
+    # 将源骨骼当前姿态恢复为静置姿态。
     source_pose = armature.pose.bones.get(source_name)
     if source_pose is not None:
         source_pose.rotation_mode = 'QUATERNION'
@@ -654,7 +654,7 @@ def _write_custom_property_curve(pose_bone, prop_name, frames, values):
     return True
 
 
-def store_toe_to_ex_custom(armature):
+def store_ex_to_ex_custom(armature):
     """把 足先EX 的旋转曲线备份到自定义属性，并清空骨骼关键帧。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
@@ -684,7 +684,7 @@ def store_toe_to_ex_custom(armature):
     return stored
 
 
-def restore_toe_from_ex_custom(armature):
+def restore_ex_from_ex_custom(armature):
     """把自定义属性里的脚尖旋转恢复到 足先EX 骨骼曲线。"""
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
@@ -752,11 +752,11 @@ def convert_toe_rotation(armature, enabled):
             _reset_bone_rotation(armature, source + side)
         return True, ''
     if enabled:
-        restore_toe_from_ex_custom(armature)
+        restore_ex_from_ex_custom(armature)
     elif any(_has_ex_custom(action, side) for side in ('.L', '.R')):
         clear_ex_bone_curves(armature)
     else:
-        store_toe_to_ex_custom(armature)
+        store_ex_to_ex_custom(armature)
     return True, ''
 
 

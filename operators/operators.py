@@ -7,8 +7,8 @@ import bpy
 import numpy as np
 
 from .bone_operators import (apply_finger_fix, clear_ex_bone_curves,
-                             convert_toe_rotation, restore_toe_from_ex_custom,
-                             standardize_channels, store_toe_to_ex_custom)
+                             convert_toe_rotation, restore_ex_from_ex_custom,
+                             standardize_channels, store_ex_to_ex_custom)
 from ..core import bake, geometry, mmd, smplh, solver_client
 from ..core.constants import A, NATIVE_MAPPING, OPTIONAL_MAPPING_INDEX
 
@@ -225,9 +225,9 @@ class FLOWHMR2VMD_OT_retarget_smplh(bpy.types.Operator):
             else:
                 clear_ex_bone_curves(armature)
         elif has_ex:
-            store_toe_to_ex_custom(armature)
+            store_ex_to_ex_custom(armature)
             if toe_enabled:
-                restore_toe_from_ex_custom(armature)
+                restore_ex_from_ex_custom(armature)
         if props.finger_fix == 'ENABLED':
             apply_finger_fix(armature)
 
